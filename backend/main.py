@@ -30,6 +30,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://ai-qr-visitor-management.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -169,7 +170,6 @@ class VisitorCreate(BaseModel):
     )
 
     person_to_visit: str
-
     purpose: str
 
 
@@ -181,8 +181,9 @@ def calculate_visit_minutes(visitor: Visitor) -> float:
     """
     Calculate visitor duration in minutes.
 
-    If the visitor is still inside, calculate duration
-    from entry time until the current time.
+    If the visitor is still inside,
+    calculate duration from entry time
+    until the current time.
     """
 
     if not visitor.entry_time:
@@ -199,11 +200,8 @@ def calculate_visit_minutes(visitor: Visitor) -> float:
 
 def visitor_to_dict(visitor: Visitor):
     """
-    Convert database visitor object into JSON-safe API response.
-
-    IMPORTANT:
-    datetime objects are converted to ISO strings so that
-    FastAPI can serialize them correctly.
+    Convert database visitor object into
+    JSON-safe API response.
     """
 
     return {
@@ -214,19 +212,16 @@ def visitor_to_dict(visitor: Visitor):
         "person_to_visit": visitor.person_to_visit,
         "purpose": visitor.purpose,
         "status": visitor.status,
-
         "entry_time": (
             visitor.entry_time.isoformat()
             if visitor.entry_time
             else None
         ),
-
         "exit_time": (
             visitor.exit_time.isoformat()
             if visitor.exit_time
             else None
         ),
-
         "created_at": (
             visitor.created_at.isoformat()
             if visitor.created_at
@@ -258,8 +253,6 @@ def register_visitor(
     db: Session = Depends(get_db),
 ):
     """
-    Register a visitor.
-
     Registration rules:
 
     1. First-time visitor:
@@ -274,12 +267,9 @@ def register_visitor(
     4. Latest matching visit is "Checked Out":
        ALLOWED
 
-    A visitor is identified by:
-       - same phone number OR
-       - same Gmail address
-
-    Only the latest matching visit controls whether
-    a new registration is allowed.
+    Visitor matching:
+       - same phone OR
+       - same Gmail
     """
 
     # --------------------------------------------------------
@@ -324,12 +314,10 @@ def register_visitor(
             status_code=409,
             detail={
                 "code": "VISITOR_REGISTRATION_INCOMPLETE",
-
                 "message": (
                     f"{latest_visit.name} already has "
                     "a pending visit registration."
                 ),
-
                 "current_visit": visitor_to_dict(
                     latest_visit
                 ),
@@ -349,12 +337,10 @@ def register_visitor(
             status_code=409,
             detail={
                 "code": "VISITOR_ALREADY_INSIDE",
-
                 "message": (
                     f"{latest_visit.name} is already "
                     "inside the premises."
                 ),
-
                 "current_visit": visitor_to_dict(
                     latest_visit
                 ),
@@ -367,7 +353,6 @@ def register_visitor(
     # --------------------------------------------------------
 
     previous_visits = len(matching_visits)
-
     returning_visitor = previous_visits > 0
 
     # --------------------------------------------------------
@@ -378,27 +363,19 @@ def register_visitor(
 
     visitor = Visitor(
         visitor_id=visitor_id,
-
         name=visitor_data.name.strip(),
-
         phone=phone,
-
         email=email,
-
         person_to_visit=(
             visitor_data.person_to_visit.strip()
         ),
-
         purpose=visitor_data.purpose.strip(),
-
         status="Not Checked In",
     )
 
     try:
         db.add(visitor)
-
         db.commit()
-
         db.refresh(visitor)
 
         # ----------------------------------------------------
@@ -414,7 +391,6 @@ def register_visitor(
         )
 
         qr.add_data(visitor_id)
-
         qr.make(fit=True)
 
         qr_image = qr.make_image(
@@ -434,15 +410,10 @@ def register_visitor(
 
     return {
         "message": "Visitor registered successfully",
-
         "visitor_id": visitor_id,
-
         "qr_url": f"/qr/{visitor_id}",
-
         "returning_visitor": returning_visitor,
-
         "previous_visits": previous_visits,
-
         "visitor": visitor_to_dict(visitor),
     }
 
@@ -453,7 +424,6 @@ def register_visitor(
 
 @app.get("/qr/{visitor_id}")
 def get_qr(visitor_id: str):
-
     qr_path = QR_DIR / f"{visitor_id}.png"
 
     if not qr_path.exists():
@@ -476,7 +446,6 @@ def get_qr(visitor_id: str):
 
 @app.get("/qr/{visitor_id}/download")
 def download_qr(visitor_id: str):
-
     qr_path = QR_DIR / f"{visitor_id}.png"
 
     if not qr_path.exists():
@@ -501,7 +470,6 @@ def download_qr(visitor_id: str):
 def get_visitors(
     db: Session = Depends(get_db),
 ):
-
     visitors = (
         db.query(Visitor)
         .order_by(
@@ -525,7 +493,6 @@ def get_visitor(
     visitor_id: str,
     db: Session = Depends(get_db),
 ):
-
     visitor = (
         db.query(Visitor)
         .filter(
@@ -552,7 +519,6 @@ def check_in(
     visitor_id: str,
     db: Session = Depends(get_db),
 ):
-
     visitor = (
         db.query(Visitor)
         .filter(
@@ -574,13 +540,10 @@ def check_in(
         )
 
     visitor.status = "Checked In"
-
     visitor.entry_time = datetime.now()
-
     visitor.exit_time = None
 
     db.commit()
-
     db.refresh(visitor)
 
     return {
@@ -598,7 +561,6 @@ def check_out(
     visitor_id: str,
     db: Session = Depends(get_db),
 ):
-
     visitor = (
         db.query(Visitor)
         .filter(
@@ -616,26 +578,22 @@ def check_out(
     if visitor.status != "Checked In":
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Visitor is not currently checked in"
-            ),
+            detail="Visitor is not currently checked in",
         )
 
     visitor.exit_time = datetime.now()
-
     visitor.status = "Checked Out"
 
     db.commit()
-
     db.refresh(visitor)
 
-    duration = calculate_visit_minutes(visitor)
+    duration = calculate_visit_minutes(
+        visitor
+    )
 
     return {
         "message": "Visitor checked out successfully",
-
         "visit_duration_minutes": duration,
-
         "visitor": visitor_to_dict(visitor),
     }
 
@@ -648,7 +606,6 @@ def check_out(
 def get_analytics(
     db: Session = Depends(get_db),
 ):
-
     visitors = (
         db.query(Visitor)
         .order_by(
@@ -710,7 +667,6 @@ def get_analytics(
     longest_visit_name = ""
 
     if completed_visits:
-
         longest_visitor = max(
             completed_visits,
             key=calculate_visit_minutes,
@@ -727,7 +683,6 @@ def get_analytics(
     person_visit_counts = {}
 
     for visitor in visitors:
-
         person = visitor.person_to_visit.strip()
 
         person_visit_counts[person] = (
@@ -737,7 +692,6 @@ def get_analytics(
     most_visited_person = ""
 
     if person_visit_counts:
-
         most_visited_person = max(
             person_visit_counts,
             key=person_visit_counts.get,
@@ -745,17 +699,14 @@ def get_analytics(
 
     # --------------------------------------------------------
     # REPEAT VISITORS
-    # One card per phone number
     # --------------------------------------------------------
 
     visitor_groups = {}
 
     for visitor in visitors:
-
         phone = visitor.phone.strip()
 
         if phone not in visitor_groups:
-
             visitor_groups[phone] = {
                 "visitor_id": visitor.visitor_id,
                 "name": visitor.name,
@@ -778,23 +729,19 @@ def get_analytics(
     security_alerts = []
 
     for visitor in visitors:
-
-        duration = calculate_visit_minutes(visitor)
+        duration = calculate_visit_minutes(
+            visitor
+        )
 
         if visitor.status == "Checked In":
 
             if duration > 240:
-
                 security_alerts.append(
                     {
                         "visitor_id": visitor.visitor_id,
-
                         "visitor": visitor.name,
-
                         "type": "Long Visit",
-
                         "severity": "High",
-
                         "message": (
                             "Visitor has been inside "
                             "for more than 4 hours."
@@ -803,17 +750,12 @@ def get_analytics(
                 )
 
             elif duration > 120:
-
                 security_alerts.append(
                     {
                         "visitor_id": visitor.visitor_id,
-
                         "visitor": visitor.name,
-
                         "type": "Long Visit",
-
                         "severity": "Medium",
-
                         "message": (
                             "Visitor has been inside "
                             "for more than 2 hours."
@@ -827,13 +769,11 @@ def get_analytics(
             for alert in security_alerts
             if alert["severity"] == "High"
         ),
-
         "medium": sum(
             1
             for alert in security_alerts
             if alert["severity"] == "Medium"
         ),
-
         "low": sum(
             1
             for alert in security_alerts
@@ -843,30 +783,19 @@ def get_analytics(
 
     return {
         "total_visitors": total_visitors,
-
         "currently_inside": currently_inside,
-
         "checked_out": checked_out,
-
         "pending": pending,
-
         "average_visit_minutes": average_visit_minutes,
-
         "longest_visit_minutes": round(
             longest_visit_minutes,
             2,
         ),
-
         "longest_visit_name": longest_visit_name,
-
         "most_visited_person": most_visited_person,
-
         "person_visit_counts": person_visit_counts,
-
         "repeat_visitors": repeat_visitors,
-
         "security_alerts": security_alerts,
-
         "alert_summary": alert_summary,
     }
 
@@ -879,13 +808,11 @@ def get_analytics(
 def ai_behavior_analysis(
     db: Session = Depends(get_db),
 ):
-
     """
     Rule-Based AI Visitor Behavior Analysis.
 
-    The system analyzes:
-
-    1. Repeat registrations using phone number
+    Analyzes:
+    1. Repeat registrations
     2. Long visit duration
     3. Employee visit frequency
     4. Current check-in status
@@ -906,7 +833,6 @@ def ai_behavior_analysis(
     phone_visit_counts = {}
 
     for visitor in visitors:
-
         phone = visitor.phone.strip()
 
         phone_visit_counts[phone] = (
@@ -920,7 +846,6 @@ def ai_behavior_analysis(
     employee_visit_counts = {}
 
     for visitor in visitors:
-
         employee = visitor.person_to_visit.strip()
 
         employee_visit_counts[employee] = (
@@ -932,15 +857,11 @@ def ai_behavior_analysis(
     # --------------------------------------------------------
 
     visitor_scores = []
-
     behavior_alerts = []
 
     high_risk = 0
-
     medium_risk = 0
-
     low_risk = 0
-
     normal = 0
 
     # --------------------------------------------------------
@@ -950,11 +871,9 @@ def ai_behavior_analysis(
     for visitor in visitors:
 
         risk_score = 0
-
         reasons = []
 
         phone = visitor.phone.strip()
-
         employee = visitor.person_to_visit.strip()
 
         visit_count = phone_visit_counts.get(
@@ -978,7 +897,6 @@ def ai_behavior_analysis(
         # ----------------------------------------------------
 
         if visit_duration > 240:
-
             risk_score += 40
 
             reasons.append(
@@ -990,7 +908,6 @@ def ai_behavior_analysis(
         # ----------------------------------------------------
 
         elif visit_duration > 120:
-
             risk_score += 20
 
             reasons.append(
@@ -1002,7 +919,6 @@ def ai_behavior_analysis(
         # ----------------------------------------------------
 
         if visit_count >= 3:
-
             risk_score += 30
 
             reasons.append(
@@ -1010,7 +926,6 @@ def ai_behavior_analysis(
             )
 
         elif visit_count == 2:
-
             risk_score += 10
 
             reasons.append(
@@ -1022,7 +937,6 @@ def ai_behavior_analysis(
         # ----------------------------------------------------
 
         if employee_visit_count >= 5:
-
             risk_score += 20
 
             reasons.append(
@@ -1034,7 +948,6 @@ def ai_behavior_analysis(
         # ----------------------------------------------------
 
         if visitor.status == "Checked In":
-
             risk_score += 5
 
             reasons.append(
@@ -1046,27 +959,19 @@ def ai_behavior_analysis(
         # ----------------------------------------------------
 
         if risk_score >= 70:
-
             risk_level = "High"
-
             high_risk += 1
 
         elif risk_score >= 40:
-
             risk_level = "Medium"
-
             medium_risk += 1
 
         elif risk_score >= 15:
-
             risk_level = "Low"
-
             low_risk += 1
 
         else:
-
             risk_level = "Normal"
-
             normal += 1
 
         # ----------------------------------------------------
@@ -1076,11 +981,8 @@ def ai_behavior_analysis(
         visitor_scores.append(
             {
                 "visitor_id": visitor.visitor_id,
-
                 "name": visitor.name,
-
                 "risk_score": risk_score,
-
                 "risk_level": risk_level,
             }
         )
@@ -1090,25 +992,16 @@ def ai_behavior_analysis(
         # ----------------------------------------------------
 
         if risk_level != "Normal":
-
             behavior_alerts.append(
                 {
                     "visitor_id": visitor.visitor_id,
-
                     "visitor": visitor.name,
-
                     "risk_score": risk_score,
-
                     "risk_level": risk_level,
-
                     "visit_count": visit_count,
-
                     "visit_duration_minutes": visit_duration,
-
                     "person_to_visit": visitor.person_to_visit,
-
                     "status": visitor.status,
-
                     "reasons": reasons,
                 }
             )
@@ -1118,25 +1011,21 @@ def ai_behavior_analysis(
     # --------------------------------------------------------
 
     if high_risk > 0:
-
         overall_status = (
             "High Risk Behavior Detected"
         )
 
     elif medium_risk > 0:
-
         overall_status = (
             "Medium Risk Behavior Detected"
         )
 
     elif low_risk > 0:
-
         overall_status = (
             "Low Risk Behavior Detected"
         )
 
     else:
-
         overall_status = (
             "No Unusual Behavior Detected"
         )
@@ -1149,24 +1038,15 @@ def ai_behavior_analysis(
         "analysis_type": (
             "Rule-Based AI Behavior Analysis"
         ),
-
         "analysis_version": "1.1",
-
         "total_visitors": len(visitors),
-
         "overall_status": overall_status,
-
         "summary": {
             "high_risk": high_risk,
-
             "medium_risk": medium_risk,
-
             "low_risk": low_risk,
-
             "normal": normal,
         },
-
         "behavior_alerts": behavior_alerts,
-
         "visitor_scores": visitor_scores,
     }
