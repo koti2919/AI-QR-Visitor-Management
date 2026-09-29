@@ -2,13 +2,33 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
+from sqlalchemy.exc import OperationalError
 from datetime import datetime
 from pathlib import Path
 import uuid
 import qrcode
 
+# ============================================================
+# AUTHENTICATION
+# ============================================================
+
+from auth import (
+    register_auth_routes,
+    get_current_user,
+    require_admin,
+    User,
+)
+
+# ============================================================
+# EMAIL SERVICE
+# ============================================================
+
+from email_service import (
+    send_approval_email,
+    send_rejection_email,
+)
 
 # ============================================================
 # APP CONFIGURATION
@@ -17,9 +37,8 @@ import qrcode
 app = FastAPI(
     title="AI Smart Visitor Management",
     description="QR-Based Smart Visitor Management System",
-    version="3.1.0",
+    version="4.0.4",
 )
-
 
 # ============================================================
 # CORS
@@ -29,14 +48,15 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "http://localhost:3001",
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
         "https://ai-qr-visitor-management.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # ============================================================
 # DATABASE CONFIGURATION
@@ -59,10 +79,10 @@ SessionLocal = sessionmaker(
 
 Base = declarative_base()
 
-
 # ============================================================
 # VISITOR DATABASE MODEL
 # ============================================================
+
 
 class Visitor(Base):
     __tablename__ = "visitors"
@@ -110,6 +130,12 @@ class Visitor(Base):
         default="Not Checked In",
     )
 
+    approval_status = Column(
+        String,
+        default="Pending Approval",
+        nullable=False,
+    )
+
     entry_time = Column(
         DateTime,
         nullable=True,
@@ -126,33 +152,112 @@ class Visitor(Base):
     )
 
 
+# ============================================================
+# CREATE TABLES
+# ============================================================
+
 Base.metadata.create_all(bind=engine)
 
+# ============================================================
+# SAFE DATABASE MIGRATION
+# ============================================================
+
+
+def migrate_database():
+    """
+    Safely makes sure approval_status exists.
+    Existing visitor data is preserved.
+    """
+
+    with engine.connect() as connection:
+        result = connection.execute(
+            text("PRAGMA table_info(visitors)")
+        )
+
+        columns = [
+            row[1]
+            for row in result.fetchall()
+        ]
+
+        if "approval_status" not in columns:
+            try:
+                connection.execute(
+                    text(
+                        """
+                        ALTER TABLE visitors
+                        ADD COLUMN approval_status
+                        VARCHAR DEFAULT 'Approved'
+                        """
+                    )
+                )
+
+                connection.commit()
+
+                print(
+                    "Database migration: approval_status column added."
+                )
+
+            except OperationalError as error:
+                if "duplicate column name" not in str(error).lower():
+                    raise
+
+                print(
+                    "Database migration: approval_status already exists."
+                )
+
+        else:
+            print(
+                "Database migration: approval_status already exists."
+            )
+
+        connection.execute(
+            text(
+                """
+                UPDATE visitors
+                SET approval_status = 'Approved'
+                WHERE approval_status IS NULL
+                """
+            )
+        )
+
+        connection.commit()
+
+
+migrate_database()
+
+# ============================================================
+# AUTHENTICATION ROUTES
+# ============================================================
+
+register_auth_routes(app)
 
 # ============================================================
 # QR DIRECTORY
 # ============================================================
 
 QR_DIR = BASE_DIR / "qr_codes"
-QR_DIR.mkdir(exist_ok=True)
 
+QR_DIR.mkdir(exist_ok=True)
 
 # ============================================================
 # DATABASE DEPENDENCY
 # ============================================================
+
 
 def get_db():
     db = SessionLocal()
 
     try:
         yield db
+
     finally:
         db.close()
 
 
 # ============================================================
-# REQUEST SCHEMA
+# REQUEST SCHEMAS
 # ============================================================
+
 
 class VisitorCreate(BaseModel):
     name: str
@@ -170,22 +275,24 @@ class VisitorCreate(BaseModel):
     )
 
     person_to_visit: str
+
     purpose: str
+
+
+class QRVerificationRequest(BaseModel):
+    visitor_id: str = Field(
+        ...,
+        min_length=1,
+        description="Visitor ID encoded in the QR code",
+    )
 
 
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
+
 def calculate_visit_minutes(visitor: Visitor) -> float:
-    """
-    Calculate visitor duration in minutes.
-
-    If the visitor is still inside,
-    calculate duration from entry time
-    until the current time.
-    """
-
     if not visitor.entry_time:
         return 0.0
 
@@ -195,15 +302,13 @@ def calculate_visit_minutes(visitor: Visitor) -> float:
         end_time - visitor.entry_time
     ).total_seconds() / 60
 
-    return round(max(duration, 0), 2)
+    return round(
+        max(duration, 0),
+        2,
+    )
 
 
 def visitor_to_dict(visitor: Visitor):
-    """
-    Convert database visitor object into
-    JSON-safe API response.
-    """
-
     return {
         "visitor_id": visitor.visitor_id,
         "name": visitor.name,
@@ -212,6 +317,7 @@ def visitor_to_dict(visitor: Visitor):
         "person_to_visit": visitor.person_to_visit,
         "purpose": visitor.purpose,
         "status": visitor.status,
+        "approval_status": visitor.approval_status,
         "entry_time": (
             visitor.entry_time.isoformat()
             if visitor.entry_time
@@ -234,12 +340,19 @@ def visitor_to_dict(visitor: Visitor):
 # ROOT ENDPOINT
 # ============================================================
 
+
 @app.get("/")
 def root():
     return {
         "message": "AI Smart Visitor Management API is running",
-        "version": "3.1.0",
+        "version": "4.0.4",
         "status": "online",
+        "authentication": "enabled",
+        "host_approval": "enabled",
+        "admin_authorization": "enabled",
+        "email_notifications": "enabled",
+        "latest_visitor_status": "enabled",
+        "qr_verification": "enabled",
     }
 
 
@@ -247,41 +360,46 @@ def root():
 # REGISTER VISITOR
 # ============================================================
 
+
 @app.post("/register")
 def register_visitor(
     visitor_data: VisitorCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Registration rules:
-
-    1. First-time visitor:
-       ALLOWED
-
-    2. Latest matching visit is "Not Checked In":
-       BLOCKED
-
-    3. Latest matching visit is "Checked In":
-       BLOCKED
-
-    4. Latest matching visit is "Checked Out":
-       ALLOWED
-
-    Visitor matching:
-       - same phone OR
-       - same Gmail
+    Register a visitor.
+    New registrations require host approval.
     """
-
-    # --------------------------------------------------------
-    # CLEAN INPUT
-    # --------------------------------------------------------
 
     phone = visitor_data.phone.strip()
     email = visitor_data.email.strip().lower()
 
-    # --------------------------------------------------------
+    # ========================================================
+    # AUTHENTICATED VISITOR CHECK
+    # ========================================================
+
+    if email != current_user.email:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "The registration Gmail must match "
+                "the authenticated visitor account."
+            ),
+        )
+
+    if phone != current_user.phone:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "The registration phone number must match "
+                "the authenticated visitor account."
+            ),
+        )
+
+    # ========================================================
     # FIND PREVIOUS VISITS
-    # --------------------------------------------------------
+    # ========================================================
 
     matching_visits = (
         db.query(Visitor)
@@ -301,14 +419,64 @@ def register_visitor(
         else None
     )
 
-    # --------------------------------------------------------
-    # BLOCK 1:
-    # PREVIOUS REGISTRATION NOT CHECKED IN
-    # --------------------------------------------------------
+    # ========================================================
+    # BLOCK PENDING APPROVAL
+    # ========================================================
 
     if (
         latest_visit
-        and latest_visit.status == "Not Checked In"
+        and latest_visit.approval_status
+        == "Pending Approval"
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "VISITOR_APPROVAL_PENDING",
+                "message": (
+                    f"{latest_visit.name} already has "
+                    "a visit request waiting for approval."
+                ),
+                "current_visit": visitor_to_dict(
+                    latest_visit
+                ),
+            },
+        )
+
+    # ========================================================
+    # BLOCK REJECTED VISIT
+    # ========================================================
+
+    if (
+        latest_visit
+        and latest_visit.approval_status
+        == "Rejected"
+        and latest_visit.status
+        != "Checked Out"
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "VISITOR_REQUEST_REJECTED",
+                "message": (
+                    "Your latest visitor request was rejected. "
+                    "Please contact the host before submitting again."
+                ),
+                "current_visit": visitor_to_dict(
+                    latest_visit
+                ),
+            },
+        )
+
+    # ========================================================
+    # BLOCK NOT CHECKED IN
+    # ========================================================
+
+    if (
+        latest_visit
+        and latest_visit.status
+        == "Not Checked In"
+        and latest_visit.approval_status
+        == "Approved"
     ):
         raise HTTPException(
             status_code=409,
@@ -324,14 +492,14 @@ def register_visitor(
             },
         )
 
-    # --------------------------------------------------------
-    # BLOCK 2:
-    # VISITOR IS CURRENTLY INSIDE
-    # --------------------------------------------------------
+    # ========================================================
+    # BLOCK CURRENTLY INSIDE
+    # ========================================================
 
     if (
         latest_visit
-        and latest_visit.status == "Checked In"
+        and latest_visit.status
+        == "Checked In"
     ):
         raise HTTPException(
             status_code=409,
@@ -347,17 +515,13 @@ def register_visitor(
             },
         )
 
-    # --------------------------------------------------------
-    # ALLOWED:
-    # FIRST VISIT OR PREVIOUS VISIT CHECKED OUT
-    # --------------------------------------------------------
+    # ========================================================
+    # CREATE VISITOR
+    # ========================================================
 
     previous_visits = len(matching_visits)
-    returning_visitor = previous_visits > 0
 
-    # --------------------------------------------------------
-    # CREATE NEW VISITOR RECORD
-    # --------------------------------------------------------
+    returning_visitor = previous_visits > 0
 
     visitor_id = str(uuid.uuid4())
 
@@ -371,6 +535,7 @@ def register_visitor(
         ),
         purpose=visitor_data.purpose.strip(),
         status="Not Checked In",
+        approval_status="Pending Approval",
     )
 
     try:
@@ -378,10 +543,15 @@ def register_visitor(
         db.commit()
         db.refresh(visitor)
 
-        # ----------------------------------------------------
-        # GENERATE QR CODE
-        # ----------------------------------------------------
+    except Exception:
+        db.rollback()
+        raise
 
+    # ========================================================
+    # GENERATE QR FILE
+    # ========================================================
+
+    try:
         qr_path = QR_DIR / f"{visitor_id}.png"
 
         qr = qrcode.QRCode(
@@ -391,6 +561,7 @@ def register_visitor(
         )
 
         qr.add_data(visitor_id)
+
         qr.make(fit=True)
 
         qr_image = qr.make_image(
@@ -401,19 +572,65 @@ def register_visitor(
         qr_image.save(qr_path)
 
     except Exception:
-        db.rollback()
+        db.delete(visitor)
+        db.commit()
         raise
 
-    # --------------------------------------------------------
-    # SUCCESS RESPONSE
-    # --------------------------------------------------------
+    # ========================================================
+    # RESPONSE
+    # ========================================================
 
     return {
-        "message": "Visitor registered successfully",
+        "message": (
+            "Visitor registration submitted "
+            "for host approval."
+        ),
         "visitor_id": visitor_id,
         "qr_url": f"/qr/{visitor_id}",
         "returning_visitor": returning_visitor,
         "previous_visits": previous_visits,
+        "approval_status": "Pending Approval",
+        "visitor": visitor_to_dict(visitor),
+    }
+
+
+# ============================================================
+# GET LATEST VISITOR STATUS
+# ============================================================
+
+
+@app.get("/visitor/latest")
+def get_latest_visitor(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the latest visitor registration belonging
+    to the authenticated visitor.
+    """
+
+    visitor = (
+        db.query(Visitor)
+        .filter(
+            (Visitor.email == current_user.email)
+            & (Visitor.phone == current_user.phone)
+        )
+        .order_by(
+            Visitor.created_at.desc()
+        )
+        .first()
+    )
+
+    if not visitor:
+        return {
+            "found": False,
+            "message": "No visitor registration found.",
+            "visitor": None,
+        }
+
+    return {
+        "found": True,
+        "message": "Latest visitor status retrieved successfully.",
         "visitor": visitor_to_dict(visitor),
     }
 
@@ -422,8 +639,36 @@ def register_visitor(
 # GET QR CODE
 # ============================================================
 
+
 @app.get("/qr/{visitor_id}")
-def get_qr(visitor_id: str):
+def get_qr(
+    visitor_id: str,
+    db: Session = Depends(get_db),
+):
+    visitor = (
+        db.query(Visitor)
+        .filter(
+            Visitor.visitor_id == visitor_id
+        )
+        .first()
+    )
+
+    if not visitor:
+        raise HTTPException(
+            status_code=404,
+            detail="Visitor not found",
+        )
+
+    if visitor.approval_status != "Approved":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "QR code is not active. "
+                f"Current approval status: "
+                f"{visitor.approval_status}"
+            ),
+        )
+
     qr_path = QR_DIR / f"{visitor_id}.png"
 
     if not qr_path.exists():
@@ -444,8 +689,35 @@ def get_qr(visitor_id: str):
 # DOWNLOAD QR CODE
 # ============================================================
 
+
 @app.get("/qr/{visitor_id}/download")
-def download_qr(visitor_id: str):
+def download_qr(
+    visitor_id: str,
+    db: Session = Depends(get_db),
+):
+    visitor = (
+        db.query(Visitor)
+        .filter(
+            Visitor.visitor_id == visitor_id
+        )
+        .first()
+    )
+
+    if not visitor:
+        raise HTTPException(
+            status_code=404,
+            detail="Visitor not found",
+        )
+
+    if visitor.approval_status != "Approved":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "QR code download is unavailable "
+                "until the visit is approved."
+            ),
+        )
+
     qr_path = QR_DIR / f"{visitor_id}.png"
 
     if not qr_path.exists():
@@ -463,12 +735,115 @@ def download_qr(visitor_id: str):
 
 
 # ============================================================
-# GET ALL VISITORS
+# VERIFY QR CODE
+# ADMIN ONLY
 # ============================================================
+
+
+@app.post("/verify-qr")
+def verify_qr(
+    data: QRVerificationRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin),
+):
+    """
+    Verify a visitor QR code.
+
+    The QR code contains the visitor_id.
+    Only approved visitors can pass verification.
+    """
+
+    visitor = (
+        db.query(Visitor)
+        .filter(
+            Visitor.visitor_id == data.visitor_id.strip()
+        )
+        .first()
+    )
+
+    if not visitor:
+        raise HTTPException(
+            status_code=404,
+            detail="Invalid QR code. Visitor not found.",
+        )
+
+    # ========================================================
+    # REJECTED VISITOR
+    # ========================================================
+
+    if visitor.approval_status == "Rejected":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "QR code is invalid because "
+                "the visitor request was rejected."
+            ),
+        )
+
+    # ========================================================
+    # PENDING VISITOR
+    # ========================================================
+
+    if visitor.approval_status != "Approved":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "QR code is not active. "
+                f"Current approval status: "
+                f"{visitor.approval_status}"
+            ),
+        )
+
+    # ========================================================
+    # ALREADY CHECKED OUT
+    # ========================================================
+
+    if visitor.status == "Checked Out":
+        raise HTTPException(
+            status_code=409,
+            detail="This visitor has already checked out.",
+        )
+
+    # ========================================================
+    # ALREADY CHECKED IN
+    # ========================================================
+
+    if visitor.status == "Checked In":
+        return {
+            "verified": True,
+            "message": (
+                "QR code verified. "
+                "Visitor is already checked in."
+            ),
+            "action": "ALREADY_CHECKED_IN",
+            "visitor": visitor_to_dict(visitor),
+        }
+
+    # ========================================================
+    # READY FOR CHECK-IN
+    # ========================================================
+
+    return {
+        "verified": True,
+        "message": (
+            "QR code verified successfully. "
+            "Visitor can check in."
+        ),
+        "action": "CHECK_IN_REQUIRED",
+        "visitor": visitor_to_dict(visitor),
+    }
+
+
+# ============================================================
+# GET ALL VISITORS
+# ADMIN ONLY
+# ============================================================
+
 
 @app.get("/visitors")
 def get_visitors(
     db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin),
 ):
     visitors = (
         db.query(Visitor)
@@ -488,10 +863,12 @@ def get_visitors(
 # GET SINGLE VISITOR
 # ============================================================
 
+
 @app.get("/visitor/{visitor_id}")
 def get_visitor(
     visitor_id: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     visitor = (
         db.query(Visitor)
@@ -507,17 +884,128 @@ def get_visitor(
             detail="Visitor not found",
         )
 
+    # Visitor can only view their own record.
+    if current_user.role != "admin":
+        if (
+            visitor.email != current_user.email
+            or visitor.phone != current_user.phone
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "You can only access "
+                    "your own visitor record."
+                ),
+            )
+
     return visitor_to_dict(visitor)
 
 
 # ============================================================
-# CHECK IN
+# APPROVE VISITOR
+# ADMIN ONLY
 # ============================================================
 
-@app.post("/check-in/{visitor_id}")
-def check_in(
+
+@app.post("/visitor/{visitor_id}/approve")
+def approve_visitor(
     visitor_id: str,
     db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin),
+):
+    visitor = (
+        db.query(Visitor)
+        .filter(
+            Visitor.visitor_id == visitor_id
+        )
+        .first()
+    )
+
+    if not visitor:
+        raise HTTPException(
+            status_code=404,
+            detail="Visitor not found",
+        )
+
+    if visitor.approval_status == "Approved":
+        return {
+            "message": "Visitor is already approved.",
+            "visitor": visitor_to_dict(visitor),
+            "qr_active": True,
+            "email_sent": False,
+        }
+
+    if visitor.approval_status == "Rejected":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A rejected visitor request cannot "
+                "be approved directly."
+            ),
+        )
+
+    # ========================================================
+    # APPROVE
+    # ========================================================
+
+    visitor.approval_status = "Approved"
+
+    db.commit()
+    db.refresh(visitor)
+
+    # ========================================================
+    # QR FILE
+    # ========================================================
+
+    qr_path = QR_DIR / f"{visitor.visitor_id}.png"
+
+    # ========================================================
+    # SEND APPROVAL EMAIL
+    # ========================================================
+
+    email_sent = False
+
+    try:
+        email_sent = send_approval_email(
+            visitor,
+            qr_path,
+        )
+
+    except Exception as error:
+        print(
+            f"Approval email error: {error}"
+        )
+
+    # ========================================================
+    # RESPONSE
+    # ========================================================
+
+    return {
+        "message": (
+            "Visitor request approved successfully."
+        ),
+        "visitor": visitor_to_dict(visitor),
+        "qr_active": True,
+        "email_sent": email_sent,
+        "email_status": (
+            "Approval email sent successfully."
+            if email_sent
+            else "Visitor approved, but approval email was not sent."
+        ),
+    }
+
+
+# ============================================================
+# REJECT VISITOR
+# ADMIN ONLY
+# ============================================================
+
+
+@app.post("/visitor/{visitor_id}/reject")
+def reject_visitor(
+    visitor_id: str,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin),
 ):
     visitor = (
         db.query(Visitor)
@@ -536,14 +1024,120 @@ def check_in(
     if visitor.status == "Checked In":
         raise HTTPException(
             status_code=400,
+            detail=(
+                "A visitor who is already checked in "
+                "cannot be rejected."
+            ),
+        )
+
+    if visitor.approval_status == "Rejected":
+        return {
+            "message": "Visitor is already rejected.",
+            "visitor": visitor_to_dict(visitor),
+            "qr_active": False,
+            "email_sent": False,
+        }
+
+    # ========================================================
+    # REJECT
+    # ========================================================
+
+    visitor.approval_status = "Rejected"
+
+    db.commit()
+    db.refresh(visitor)
+
+    # ========================================================
+    # SEND REJECTION EMAIL
+    # ========================================================
+
+    email_sent = False
+
+    try:
+        email_sent = send_rejection_email(
+            visitor
+        )
+
+    except Exception as error:
+        print(
+            f"Rejection email error: {error}"
+        )
+
+    # ========================================================
+    # RESPONSE
+    # ========================================================
+
+    return {
+        "message": (
+            "Visitor request rejected successfully."
+        ),
+        "visitor": visitor_to_dict(visitor),
+        "qr_active": False,
+        "email_sent": email_sent,
+        "email_status": (
+            "Rejection email sent successfully."
+            if email_sent
+            else "Visitor rejected, but rejection email was not sent."
+        ),
+    }
+
+
+# ============================================================
+# CHECK IN
+# ADMIN ONLY
+# ============================================================
+
+
+@app.post("/check-in/{visitor_id}")
+def check_in(
+    visitor_id: str,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin),
+):
+    visitor = (
+        db.query(Visitor)
+        .filter(
+            Visitor.visitor_id == visitor_id
+        )
+        .first()
+    )
+
+    if not visitor:
+        raise HTTPException(
+            status_code=404,
+            detail="Visitor not found",
+        )
+
+    if visitor.approval_status != "Approved":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Visitor cannot check in because "
+                f"the request is "
+                f"{visitor.approval_status}."
+            ),
+        )
+
+    if visitor.status == "Checked In":
+        raise HTTPException(
+            status_code=400,
             detail="Visitor is already checked in",
         )
 
+    if visitor.status == "Checked Out":
+        raise HTTPException(
+            status_code=400,
+            detail="This visitor has already checked out.",
+        )
+
     visitor.status = "Checked In"
+
     visitor.entry_time = datetime.now()
+
     visitor.exit_time = None
 
     db.commit()
+
     db.refresh(visitor)
 
     return {
@@ -554,12 +1148,15 @@ def check_in(
 
 # ============================================================
 # CHECK OUT
+# ADMIN ONLY
 # ============================================================
+
 
 @app.post("/check-out/{visitor_id}")
 def check_out(
     visitor_id: str,
     db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin),
 ):
     visitor = (
         db.query(Visitor)
@@ -578,13 +1175,18 @@ def check_out(
     if visitor.status != "Checked In":
         raise HTTPException(
             status_code=400,
-            detail="Visitor is not currently checked in",
+            detail=(
+                "Visitor is not currently "
+                "checked in"
+            ),
         )
 
     visitor.exit_time = datetime.now()
+
     visitor.status = "Checked Out"
 
     db.commit()
+
     db.refresh(visitor)
 
     duration = calculate_visit_minutes(
@@ -592,7 +1194,9 @@ def check_out(
     )
 
     return {
-        "message": "Visitor checked out successfully",
+        "message": (
+            "Visitor checked out successfully"
+        ),
         "visit_duration_minutes": duration,
         "visitor": visitor_to_dict(visitor),
     }
@@ -600,11 +1204,14 @@ def check_out(
 
 # ============================================================
 # ANALYTICS
+# ADMIN ONLY
 # ============================================================
+
 
 @app.get("/analytics")
 def get_analytics(
     db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin),
 ):
     visitors = (
         db.query(Visitor)
@@ -631,12 +1238,27 @@ def get_analytics(
     pending = sum(
         1
         for visitor in visitors
-        if visitor.status == "Not Checked In"
+        if visitor.approval_status
+        == "Pending Approval"
     )
 
-    # --------------------------------------------------------
+    approved = sum(
+        1
+        for visitor in visitors
+        if visitor.approval_status
+        == "Approved"
+    )
+
+    rejected = sum(
+        1
+        for visitor in visitors
+        if visitor.approval_status
+        == "Rejected"
+    )
+
+    # ========================================================
     # VISIT DURATIONS
-    # --------------------------------------------------------
+    # ========================================================
 
     completed_visits = [
         visitor
@@ -676,9 +1298,9 @@ def get_analytics(
             longest_visitor.name
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # MOST VISITED PERSON
-    # --------------------------------------------------------
+    # ========================================================
 
     person_visit_counts = {}
 
@@ -697,9 +1319,9 @@ def get_analytics(
             key=person_visit_counts.get,
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # REPEAT VISITORS
-    # --------------------------------------------------------
+    # ========================================================
 
     visitor_groups = {}
 
@@ -722,9 +1344,9 @@ def get_analytics(
         if data["visit_count"] > 1
     ]
 
-    # --------------------------------------------------------
+    # ========================================================
     # SECURITY ALERTS
-    # --------------------------------------------------------
+    # ========================================================
 
     security_alerts = []
 
@@ -786,6 +1408,8 @@ def get_analytics(
         "currently_inside": currently_inside,
         "checked_out": checked_out,
         "pending": pending,
+        "approved": approved,
+        "rejected": rejected,
         "average_visit_minutes": average_visit_minutes,
         "longest_visit_minutes": round(
             longest_visit_minutes,
@@ -802,11 +1426,14 @@ def get_analytics(
 
 # ============================================================
 # AI BEHAVIOR ANALYSIS
+# ADMIN ONLY
 # ============================================================
+
 
 @app.get("/ai-analysis")
 def ai_behavior_analysis(
     db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin),
 ):
     """
     Rule-Based AI Visitor Behavior Analysis.
@@ -826,9 +1453,9 @@ def ai_behavior_analysis(
         .all()
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PHONE NUMBER VISIT COUNTS
-    # --------------------------------------------------------
+    # ========================================================
 
     phone_visit_counts = {}
 
@@ -839,24 +1466,31 @@ def ai_behavior_analysis(
             phone_visit_counts.get(phone, 0) + 1
         )
 
-    # --------------------------------------------------------
-    # EMPLOYEE / PERSON-TO-VISIT COUNTS
-    # --------------------------------------------------------
+    # ========================================================
+    # EMPLOYEE VISIT COUNTS
+    # ========================================================
 
     employee_visit_counts = {}
 
     for visitor in visitors:
-        employee = visitor.person_to_visit.strip()
-
-        employee_visit_counts[employee] = (
-            employee_visit_counts.get(employee, 0) + 1
+        employee = (
+            visitor.person_to_visit.strip()
         )
 
-    # --------------------------------------------------------
+        employee_visit_counts[employee] = (
+            employee_visit_counts.get(
+                employee,
+                0,
+            )
+            + 1
+        )
+
+    # ========================================================
     # ANALYSIS RESULTS
-    # --------------------------------------------------------
+    # ========================================================
 
     visitor_scores = []
+
     behavior_alerts = []
 
     high_risk = 0
@@ -864,17 +1498,21 @@ def ai_behavior_analysis(
     low_risk = 0
     normal = 0
 
-    # --------------------------------------------------------
+    # ========================================================
     # ANALYZE EACH VISITOR
-    # --------------------------------------------------------
+    # ========================================================
 
     for visitor in visitors:
 
         risk_score = 0
+
         reasons = []
 
         phone = visitor.phone.strip()
-        employee = visitor.person_to_visit.strip()
+
+        employee = (
+            visitor.person_to_visit.strip()
+        )
 
         visit_count = phone_visit_counts.get(
             phone,
@@ -888,37 +1526,42 @@ def ai_behavior_analysis(
             )
         )
 
-        visit_duration = calculate_visit_minutes(
-            visitor
+        visit_duration = (
+            calculate_visit_minutes(
+                visitor
+            )
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # RULE 1: VERY LONG VISIT
-        # ----------------------------------------------------
+        # ====================================================
 
         if visit_duration > 240:
+
             risk_score += 40
 
             reasons.append(
                 "Visit duration exceeded 4 hours"
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # RULE 2: LONG VISIT
-        # ----------------------------------------------------
+        # ====================================================
 
         elif visit_duration > 120:
+
             risk_score += 20
 
             reasons.append(
                 "Visit duration exceeded 2 hours"
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # RULE 3: REPEAT VISITOR
-        # ----------------------------------------------------
+        # ====================================================
 
         if visit_count >= 3:
+
             risk_score += 30
 
             reasons.append(
@@ -926,57 +1569,68 @@ def ai_behavior_analysis(
             )
 
         elif visit_count == 2:
+
             risk_score += 10
 
             reasons.append(
                 "Visitor has registered more than once"
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # RULE 4: FREQUENT EMPLOYEE VISITS
-        # ----------------------------------------------------
+        # ====================================================
 
         if employee_visit_count >= 5:
+
             risk_score += 20
 
             reasons.append(
                 "High number of visitors for the same employee"
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # RULE 5: CURRENTLY INSIDE
-        # ----------------------------------------------------
+        # ====================================================
 
         if visitor.status == "Checked In":
+
             risk_score += 5
 
             reasons.append(
                 "Visitor is currently inside the premises"
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # DETERMINE RISK LEVEL
-        # ----------------------------------------------------
+        # ====================================================
 
         if risk_score >= 70:
+
             risk_level = "High"
+
             high_risk += 1
 
         elif risk_score >= 40:
+
             risk_level = "Medium"
+
             medium_risk += 1
 
         elif risk_score >= 15:
+
             risk_level = "Low"
+
             low_risk += 1
 
         else:
+
             risk_level = "Normal"
+
             normal += 1
 
-        # ----------------------------------------------------
+        # ====================================================
         # VISITOR SCORE
-        # ----------------------------------------------------
+        # ====================================================
 
         visitor_scores.append(
             {
@@ -984,14 +1638,19 @@ def ai_behavior_analysis(
                 "name": visitor.name,
                 "risk_score": risk_score,
                 "risk_level": risk_level,
+                "approval_status": (
+                    visitor.approval_status
+                ),
+                "status": visitor.status,
             }
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # BEHAVIOR ALERT
-        # ----------------------------------------------------
+        # ====================================================
 
         if risk_level != "Normal":
+
             behavior_alerts.append(
                 {
                     "visitor_id": visitor.visitor_id,
@@ -1000,45 +1659,54 @@ def ai_behavior_analysis(
                     "risk_level": risk_level,
                     "visit_count": visit_count,
                     "visit_duration_minutes": visit_duration,
-                    "person_to_visit": visitor.person_to_visit,
+                    "person_to_visit": (
+                        visitor.person_to_visit
+                    ),
                     "status": visitor.status,
+                    "approval_status": (
+                        visitor.approval_status
+                    ),
                     "reasons": reasons,
                 }
             )
 
-    # --------------------------------------------------------
+    # ========================================================
     # OVERALL STATUS
-    # --------------------------------------------------------
+    # ========================================================
 
     if high_risk > 0:
+
         overall_status = (
             "High Risk Behavior Detected"
         )
 
     elif medium_risk > 0:
+
         overall_status = (
             "Medium Risk Behavior Detected"
         )
 
     elif low_risk > 0:
+
         overall_status = (
             "Low Risk Behavior Detected"
         )
 
     else:
+
         overall_status = (
             "No Unusual Behavior Detected"
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # FINAL RESPONSE
-    # --------------------------------------------------------
+    # ========================================================
 
     return {
         "analysis_type": (
             "Rule-Based AI Behavior Analysis"
         ),
-        "analysis_version": "1.1",
+        "analysis_version": "1.2",
         "total_visitors": len(visitors),
         "overall_status": overall_status,
         "summary": {

@@ -1,7 +1,14 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
 import {
+  FormEvent,
+  ReactNode,
+  useMemo,
+  useState,
+} from "react";
+
+import {
+  AlertCircle,
   ArrowRight,
   BadgeCheck,
   Building2,
@@ -20,7 +27,6 @@ import {
   UserPlus,
   Users,
   Zap,
-  AlertCircle,
 } from "lucide-react";
 
 type AuthMode = "signin" | "signup";
@@ -50,9 +56,17 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [signupComplete, setSignupComplete] = useState(false);
 
-  // --------------------------------------------------
+  // ==================================================
+  // API BASE URL
+  // ==================================================
+
+  const API_BASE_URL =
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "http://127.0.0.1:8000";
+
+  // ==================================================
   // INITIALS
-  // --------------------------------------------------
+  // ==================================================
 
   const initials = useMemo(() => {
     const words = fullName
@@ -60,7 +74,9 @@ export default function LoginPage() {
       .split(/\s+/)
       .filter(Boolean);
 
-    if (words.length === 0) return "U";
+    if (words.length === 0) {
+      return "U";
+    }
 
     if (words.length === 1) {
       return words[0].slice(0, 2).toUpperCase();
@@ -69,9 +85,9 @@ export default function LoginPage() {
     return `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase();
   }, [fullName]);
 
-  // --------------------------------------------------
+  // ==================================================
   // PASSWORD STRENGTH
-  // --------------------------------------------------
+  // ==================================================
 
   const passwordChecks = useMemo(() => {
     return {
@@ -122,9 +138,9 @@ export default function LoginPage() {
                 textClass: "text-emerald-300",
               };
 
-  // --------------------------------------------------
+  // ==================================================
   // NAME VALIDATION
-  // --------------------------------------------------
+  // ==================================================
 
   const validateName = () => {
     const name = fullName.trim();
@@ -154,12 +170,12 @@ export default function LoginPage() {
     return true;
   };
 
-  // --------------------------------------------------
+  // ==================================================
   // GMAIL VALIDATION
-  // --------------------------------------------------
+  // ==================================================
 
-  const validateGmail = () => {
-    const cleanEmail = email.trim().toLowerCase();
+  const validateGmail = (value: string) => {
+    const cleanEmail = value.trim().toLowerCase();
 
     if (!cleanEmail) {
       setError("Please enter your Gmail address.");
@@ -167,16 +183,18 @@ export default function LoginPage() {
     }
 
     if (!/^[A-Za-z0-9._%+-]+@gmail\.com$/i.test(cleanEmail)) {
-      setError("Please enter a valid Gmail address ending with @gmail.com.");
+      setError(
+        "Please enter a valid Gmail address ending with @gmail.com."
+      );
       return false;
     }
 
     return true;
   };
 
-  // --------------------------------------------------
+  // ==================================================
   // MOBILE VALIDATION
-  // --------------------------------------------------
+  // ==================================================
 
   const validateMobile = () => {
     if (!mobile) {
@@ -204,9 +222,9 @@ export default function LoginPage() {
     return true;
   };
 
-  // --------------------------------------------------
+  // ==================================================
   // PASSWORD VALIDATION
-  // --------------------------------------------------
+  // ==================================================
 
   const validateSignupPassword = () => {
     if (!signupPassword) {
@@ -247,111 +265,360 @@ export default function LoginPage() {
     return true;
   };
 
-  // --------------------------------------------------
+  // ==================================================
   // SIGN IN
-  // --------------------------------------------------
+  // ==================================================
 
-  const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSignIn = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
     event.preventDefault();
 
     setError("");
     setMessage("");
+    setLoading(true);
 
-    if (loginRole === "admin") {
-      if (!username.trim()) {
-        setError("Please enter your admin username.");
+    try {
+      // ------------------------------------------------
+      // ADMIN LOGIN
+      // ------------------------------------------------
+
+      if (loginRole === "admin") {
+        const adminEmail = username.trim().toLowerCase();
+
+        if (!adminEmail) {
+          setLoading(false);
+          setError("Please enter your admin Gmail address.");
+          return;
+        }
+
+        if (!validateGmail(adminEmail)) {
+          setLoading(false);
+          return;
+        }
+
+        if (!password) {
+          setLoading(false);
+          setError("Please enter your password.");
+          return;
+        }
+
+        const response = await fetch(
+          `${API_BASE_URL}/auth/login`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              email: adminEmail,
+              password: password,
+            }),
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data?.detail ||
+              "Invalid admin Gmail or password."
+          );
+        }
+
+        // Make sure this account is actually an admin
+        if (data?.user?.role !== "admin") {
+          throw new Error(
+            "This account does not have administrator access."
+          );
+        }
+
+        // Save JWT
+        localStorage.setItem(
+          "access_token",
+          data.access_token
+        );
+
+        // Save user
+        localStorage.setItem(
+          "user",
+          JSON.stringify(data.user)
+        );
+
+        // Save admin profile
+        localStorage.setItem(
+          "adminUser",
+          JSON.stringify(data.user)
+        );
+
+        // Admin session
+        sessionStorage.setItem(
+          "userRole",
+          "admin"
+        );
+
+        sessionStorage.setItem(
+          "adminLoggedIn",
+          "true"
+        );
+
+        // Remove visitor session
+        sessionStorage.removeItem(
+          "visitorLoggedIn"
+        );
+
+        localStorage.removeItem(
+          "visitorUser"
+        );
+
+        localStorage.removeItem(
+          "visitorProfile"
+        );
+
+        setLoading(false);
+
+        // Go to dashboard
+        window.location.replace("/");
         return;
       }
-    } else {
-      if (!signinEmail.trim()) {
+
+      // ------------------------------------------------
+      // VISITOR LOGIN
+      // ------------------------------------------------
+
+      const visitorEmail =
+        signinEmail.trim().toLowerCase();
+
+      if (!visitorEmail) {
+        setLoading(false);
         setError("Please enter your Gmail address.");
         return;
       }
 
-      if (
-        !/^[A-Za-z0-9._%+-]+@gmail\.com$/i.test(signinEmail.trim())
-      ) {
-        setError("Please enter a valid Gmail address.");
+      if (!validateGmail(visitorEmail)) {
+        setLoading(false);
         return;
       }
-    }
 
-    if (!password) {
-      setError("Please enter your password.");
-      return;
-    }
+      if (!password) {
+        setLoading(false);
+        setError("Please enter your password.");
+        return;
+      }
 
-    setLoading(true);
+      const response = await fetch(
+        `${API_BASE_URL}/auth/login`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            email: visitorEmail,
+            password: password,
+          }),
+        }
+      );
 
-    await new Promise((resolve) => setTimeout(resolve, 900));
+      const data = await response.json();
 
-    // Demo admin login
-    if (
-      loginRole === "admin" &&
-      username.trim().toLowerCase() === "admin" &&
-      password === "admin123"
-    ) {
-      sessionStorage.setItem("adminLoggedIn", "true");
-      sessionStorage.setItem("userRole", "admin");
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            "Login failed. Please check your Gmail and password."
+        );
+      }
 
+      // Make sure this is a visitor account
+      if (data?.user?.role !== "visitor") {
+        throw new Error(
+          "Please use the Admin option to sign in with an administrator account."
+        );
+      }
+
+      // Save JWT
+      localStorage.setItem(
+        "access_token",
+        data.access_token
+      );
+
+      // Save user
+      localStorage.setItem(
+        "user",
+        JSON.stringify(data.user)
+      );
+
+      localStorage.setItem(
+        "visitorUser",
+        JSON.stringify(data.user)
+      );
+
+      // Save visitor profile
+      localStorage.setItem(
+        "visitorProfile",
+        JSON.stringify({
+          name: data.user.name,
+          email: data.user.email,
+          mobile: data.user.phone,
+          profileType: "visitor",
+        })
+      );
+
+      // Visitor session
+      sessionStorage.setItem(
+        "userRole",
+        "visitor"
+      );
+
+      sessionStorage.setItem(
+        "visitorLoggedIn",
+        "true"
+      );
+
+      // Remove admin session
+      sessionStorage.removeItem(
+        "adminLoggedIn"
+      );
+
+      setLoading(false);
+
+      // Go to dashboard
       window.location.replace("/");
-      return;
+    } catch (error) {
+      setLoading(false);
+
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError(
+          "Unable to connect to the authentication server."
+        );
+      }
     }
-
-    setError(
-      loginRole === "admin"
-        ? "Invalid admin credentials. Please check your username and password."
-        : "Visitor authentication is not connected to the backend yet."
-    );
-
-    setLoading(false);
   };
 
-  // --------------------------------------------------
+  // ==================================================
   // SIGN UP
-  // --------------------------------------------------
+  // ==================================================
 
-  const handleSignUp = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSignUp = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
     event.preventDefault();
 
     setError("");
     setMessage("");
 
-    if (!validateName()) return;
-    if (!validateGmail()) return;
-    if (!validateMobile()) return;
-    if (!validateSignupPassword()) return;
+    if (!validateName()) {
+      return;
+    }
+
+    if (!validateGmail(email)) {
+      return;
+    }
+
+    if (!validateMobile()) {
+      return;
+    }
+
+    if (!validateSignupPassword()) {
+      return;
+    }
 
     setLoading(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/auth/signup`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            name: fullName.trim(),
+            phone: mobile,
+            email: email.trim().toLowerCase(),
+            password: signupPassword,
+          }),
+        }
+      );
 
-    const visitorProfile = {
-      name: fullName.trim(),
-      email: email.trim().toLowerCase(),
-      mobile,
-      createdAt: new Date().toISOString(),
-      profileType: "visitor",
-    };
+      const data = await response.json();
 
-    /*
-      Demo/local profile storage.
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            "Signup failed. Please try again."
+        );
+      }
 
-      Password is intentionally NOT stored here.
-      Real authentication should be handled by the backend.
-    */
-    localStorage.setItem(
-      "visitorProfile",
-      JSON.stringify(visitorProfile)
-    );
+      // Save JWT
+      localStorage.setItem(
+        "access_token",
+        data.access_token
+      );
 
-    setLoading(false);
-    setSignupComplete(true);
+      // Save user
+      localStorage.setItem(
+        "user",
+        JSON.stringify(data.user)
+      );
+
+      localStorage.setItem(
+        "visitorUser",
+        JSON.stringify(data.user)
+      );
+
+      // Save profile
+      localStorage.setItem(
+        "visitorProfile",
+        JSON.stringify({
+          name: data.user.name,
+          email: data.user.email,
+          mobile: data.user.phone,
+          createdAt: new Date().toISOString(),
+          profileType: "visitor",
+        })
+      );
+
+      // Visitor session
+      sessionStorage.setItem(
+        "userRole",
+        "visitor"
+      );
+
+      sessionStorage.setItem(
+        "visitorLoggedIn",
+        "true"
+      );
+
+      // Remove admin session
+      sessionStorage.removeItem(
+        "adminLoggedIn"
+      );
+
+      setLoading(false);
+      setSignupComplete(true);
+    } catch (error) {
+      setLoading(false);
+
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError(
+          "Unable to connect to the authentication server."
+        );
+      }
+    }
   };
 
-  // --------------------------------------------------
+  // ==================================================
   // SWITCH MODE
-  // --------------------------------------------------
+  // ==================================================
 
   const switchMode = (mode: AuthMode) => {
     setAuthMode(mode);
@@ -361,9 +628,9 @@ export default function LoginPage() {
     setLoading(false);
   };
 
-  // --------------------------------------------------
+  // ==================================================
   // RESET SIGNUP
-  // --------------------------------------------------
+  // ==================================================
 
   const resetSignup = () => {
     setFullName("");
@@ -395,7 +662,6 @@ export default function LoginPage() {
           {/* LEFT PANEL */}
           <section className="relative hidden overflow-hidden border-r border-white/10 bg-gradient-to-br from-cyan-500/[0.08] via-transparent to-violet-500/[0.08] p-10 lg:flex lg:flex-col lg:justify-between xl:p-14">
             <div>
-              {/* BRAND */}
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 shadow-lg shadow-cyan-500/10">
                   <ShieldCheck className="h-6 w-6 text-cyan-300" />
@@ -412,7 +678,6 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* MAIN HEADING */}
               <div className="mt-20 max-w-lg">
                 <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-cyan-300/15 bg-cyan-300/[0.07] px-4 py-2 text-xs font-medium text-cyan-200">
                   <Sparkles className="h-3.5 w-3.5" />
@@ -433,7 +698,6 @@ export default function LoginPage() {
                 </p>
               </div>
 
-              {/* FEATURES */}
               <div className="mt-12 grid gap-4 sm:grid-cols-2">
                 <Feature
                   icon={<Fingerprint />}
@@ -461,9 +725,10 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* BOTTOM */}
             <div className="mt-12 flex items-center justify-between border-t border-white/10 pt-6 text-xs text-slate-500">
-              <span>© 2026 QR Visitor Management</span>
+              <span>
+                © 2026 QR Visitor Management
+              </span>
 
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-lg shadow-emerald-400/50" />
@@ -563,6 +828,7 @@ export default function LoginPage() {
                       onClick={() => {
                         setLoginRole("admin");
                         setError("");
+                        setPassword("");
                       }}
                     />
 
@@ -574,20 +840,21 @@ export default function LoginPage() {
                       onClick={() => {
                         setLoginRole("visitor");
                         setError("");
+                        setPassword("");
                       }}
                     />
                   </div>
                 </div>
 
-                {/* ADMIN USERNAME */}
+                {/* ADMIN GMAIL */}
                 {loginRole === "admin" && (
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-300">
-                      Username
+                      Admin Gmail
                     </label>
 
                     <div className="relative">
-                      <User className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
+                      <Mail className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
 
                       <input
                         value={username}
@@ -595,9 +862,9 @@ export default function LoginPage() {
                           setUsername(e.target.value);
                           setError("");
                         }}
-                        type="text"
-                        placeholder="Enter your username"
-                        autoComplete="username"
+                        type="email"
+                        placeholder="admin@gmail.com"
+                        autoComplete="email"
                         className="h-14 w-full rounded-2xl border border-white/10 bg-black/20 pl-12 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-400/50 focus:bg-white/[0.05] focus:ring-4 focus:ring-cyan-400/5"
                       />
                     </div>
@@ -644,7 +911,11 @@ export default function LoginPage() {
                         setPassword(e.target.value);
                         setError("");
                       }}
-                      type={showPassword ? "text" : "password"}
+                      type={
+                        showPassword
+                          ? "text"
+                          : "password"
+                      }
                       placeholder="Enter your password"
                       autoComplete="current-password"
                       className="h-14 w-full rounded-2xl border border-white/10 bg-black/20 pl-12 pr-12 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-400/50 focus:bg-white/[0.05] focus:ring-4 focus:ring-cyan-400/5"
@@ -652,7 +923,9 @@ export default function LoginPage() {
 
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() =>
+                        setShowPassword(!showPassword)
+                      }
                       className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-white"
                     >
                       {showPassword ? (
@@ -665,9 +938,11 @@ export default function LoginPage() {
                 </div>
 
                 {/* ERROR */}
-                {error && <ErrorMessage message={error} />}
+                {error && (
+                  <ErrorMessage message={error} />
+                )}
 
-                {/* ADMIN DEMO */}
+                {/* ADMIN INFORMATION */}
                 {loginRole === "admin" && (
                   <div className="rounded-2xl border border-cyan-400/10 bg-cyan-400/[0.04] p-4">
                     <div className="flex items-start gap-3">
@@ -675,18 +950,12 @@ export default function LoginPage() {
 
                       <div>
                         <p className="text-xs font-semibold text-cyan-200">
-                          Demo administrator access
+                          Administrator access
                         </p>
 
                         <p className="mt-1 text-xs text-slate-500">
-                          Username:{" "}
-                          <span className="text-slate-300">
-                            admin
-                          </span>{" "}
-                          • Password:{" "}
-                          <span className="text-slate-300">
-                            admin123
-                          </span>
+                          Use the administrator Gmail and password
+                          created in the backend.
                         </p>
                       </div>
                     </div>
@@ -714,7 +983,8 @@ export default function LoginPage() {
 
                 <div className="flex items-center justify-center gap-2 text-xs text-slate-600">
                   <LockKeyhole className="h-3.5 w-3.5" />
-                  Demo/local authentication
+
+                  Secure backend authentication
                 </div>
               </form>
             )}
@@ -725,7 +995,6 @@ export default function LoginPage() {
                 onSubmit={handleSignUp}
                 className="space-y-5"
               >
-                {/* PROGRESS */}
                 <div>
                   <div className="mb-3 flex items-center justify-between text-xs">
                     <span className="font-medium text-slate-400">
@@ -888,7 +1157,11 @@ export default function LoginPage() {
                         setSignupPassword(e.target.value);
                         setError("");
                       }}
-                      type={showSignupPassword ? "text" : "password"}
+                      type={
+                        showSignupPassword
+                          ? "text"
+                          : "password"
+                      }
                       placeholder="Create a strong password"
                       autoComplete="new-password"
                       className="h-13 w-full rounded-2xl border border-white/10 bg-black/20 pl-12 pr-12 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-violet-400/50 focus:bg-white/[0.05] focus:ring-4 focus:ring-violet-400/5"
@@ -897,7 +1170,9 @@ export default function LoginPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        setShowSignupPassword(!showSignupPassword)
+                        setShowSignupPassword(
+                          !showSignupPassword
+                        )
                       }
                       className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-white"
                     >
@@ -926,7 +1201,9 @@ export default function LoginPage() {
                     <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
                       <div
                         className={`h-full rounded-full transition-all duration-300 ${passwordStrength.className}`}
-                        style={{ width: passwordStrength.width }}
+                        style={{
+                          width: passwordStrength.width,
+                        }}
                       />
                     </div>
                   </div>
@@ -988,7 +1265,9 @@ export default function LoginPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        setShowConfirmPassword(!showConfirmPassword)
+                        setShowConfirmPassword(
+                          !showConfirmPassword
+                        )
                       }
                       className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-white"
                     >
@@ -1024,7 +1303,9 @@ export default function LoginPage() {
                 </div>
 
                 {/* ERROR */}
-                {error && <ErrorMessage message={error} />}
+                {error && (
+                  <ErrorMessage message={error} />
+                )}
 
                 {/* SUBMIT */}
                 <button
@@ -1053,8 +1334,8 @@ export default function LoginPage() {
                 </button>
 
                 <p className="text-center text-xs leading-5 text-slate-600">
-                  Your account details are used for visitor identification
-                  and visitor management.
+                  Your account details are used for visitor
+                  identification and visitor management.
                 </p>
               </form>
             )}
@@ -1077,12 +1358,12 @@ export default function LoginPage() {
                 </h3>
 
                 <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-400">
-                  Your visitor account profile has been created successfully.
-                  Your registered Gmail and mobile number are ready for visitor
+                  Your visitor account profile has been
+                  created successfully. Your registered Gmail
+                  and mobile number are ready for visitor
                   identification.
                 </p>
 
-                {/* PROFILE CARD */}
                 <div className="mx-auto mt-8 max-w-sm rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-left">
                   <div className="flex items-center gap-4">
                     <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 font-bold">
@@ -1132,7 +1413,7 @@ export default function LoginPage() {
                     setPassword("");
                     setSigninEmail(email);
                     setMessage(
-                      "Your account profile was created successfully. Visitor authentication will be connected to the backend later."
+                      "Account created successfully. Please sign in using your Gmail and password."
                     );
                   }}
                   className="mt-7 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3.5 font-bold text-slate-900 transition hover:bg-slate-100"
@@ -1181,7 +1462,7 @@ function Feature({
   title,
   text,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   title: string;
   text: string;
 }) {
@@ -1214,7 +1495,7 @@ function RoleCard({
   onClick,
 }: {
   active: boolean;
-  icon: React.ReactNode;
+  icon: ReactNode;
   title: string;
   description: string;
   onClick: () => void;
@@ -1270,12 +1551,16 @@ function PasswordRule({
   return (
     <div
       className={`flex items-center gap-2 text-xs transition-colors ${
-        valid ? "text-emerald-400" : "text-slate-600"
+        valid
+          ? "text-emerald-400"
+          : "text-slate-600"
       }`}
     >
       <span
         className={`flex h-4 w-4 items-center justify-center rounded-full ${
-          valid ? "bg-emerald-400/15" : "bg-white/5"
+          valid
+            ? "bg-emerald-400/15"
+            : "bg-white/5"
         }`}
       >
         <Check className="h-2.5 w-2.5" />
@@ -1301,6 +1586,7 @@ function ErrorMessage({
       className="flex items-start gap-3 rounded-2xl border border-red-400/20 bg-red-400/5 px-4 py-3 text-sm text-red-300"
     >
       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+
       <span>{message}</span>
     </div>
   );

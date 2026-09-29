@@ -1,45 +1,43 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
 import {
-  Activity,
-  AlertTriangle,
-  BarChart3,
-  Brain,
-  CalendarDays,
-  CheckCircle2,
-  Clock3,
-  LayoutDashboard,
-  LogIn,
-  LogOut,
-  Mail,
-  Menu,
-  Phone,
-  QrCode,
-  RefreshCw,
-  ScanLine,
-  Search,
-  ShieldCheck,
-  UserCheck,
-  UserPlus,
-  UserX,
-  Users,
-  X,
-} from "lucide-react";
+  useEffect,
+  useState,
+} from "react";
 
-/*
-  API CONFIGURATION
-
-  Local development:
-  http://127.0.0.1:8000
-
-  Production:
-  Vercel uses:
-  NEXT_PUBLIC_API_BASE_URL
-*/
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   "http://127.0.0.1:8000";
+
+import {
+  LayoutDashboard,
+  UserPlus,
+  QrCode,
+  Users,
+  UserCheck,
+  UserX,
+  Search,
+  RefreshCw,
+  ScanLine,
+  LogIn,
+  LogOut,
+  Mail,
+  Phone,
+  CalendarDays,
+  ShieldCheck,
+  Activity,
+  Menu,
+  X,
+  Brain,
+  Clock3,
+  AlertTriangle,
+  CheckCircle2,
+  BarChart3,
+} from "lucide-react";
+
+// ======================================================
+// TYPES
+// ======================================================
 
 type Visitor = {
   visitor_id: string;
@@ -49,15 +47,9 @@ type Visitor = {
   person_to_visit: string;
   purpose: string;
   status: string;
+  approval_status?: string;
   entry_time: string | null;
   exit_time: string | null;
-  created_at?: string | null;
-};
-
-type RepeatVisitor = {
-  name: string;
-  phone: string;
-  visit_count: number;
 };
 
 type SecurityAlert = {
@@ -65,6 +57,12 @@ type SecurityAlert = {
   visitor: string;
   message: string;
   severity: string;
+};
+
+type RepeatVisitor = {
+  name: string;
+  phone: string;
+  visit_count: number;
 };
 
 type Analytics = {
@@ -86,446 +84,326 @@ type Analytics = {
   };
 };
 
-type FilterType =
+type VisitorFilter =
   | "All Visitors"
   | "Checked In"
   | "Checked Out"
   | "Not Checked In";
 
+// ======================================================
+// MAIN COMPONENT
+// ======================================================
+
 export default function Home() {
-  const [authChecking, setAuthChecking] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
 
-  const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    email: "",
-    person_to_visit: "",
-    purpose: "",
-  });
+  const [userRole, setUserRole] = useState<
+    "admin" | "visitor" | null
+  >(null);
 
-  const [visitors, setVisitors] = useState<Visitor[]>([]);
-  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [authUser, setAuthUser] =
+    useState<any>(null);
 
-  const [selectedVisitor, setSelectedVisitor] =
-    useState<Visitor | null>(null);
+  // ====================================================
+  // AUTH HEADERS
+  // ====================================================
 
-  const [loading, setLoading] = useState(false);
-  const [analyticsLoading, setAnalyticsLoading] =
-    useState(false);
-
-  const [message, setMessage] = useState("");
-  const [registerWarning, setRegisterWarning] =
-    useState("");
-
-  const [visitorId, setVisitorId] = useState("");
-  const [registeredVisitorName, setRegisteredVisitorName] =
-    useState("");
-
-  const [returningVisitor, setReturningVisitor] =
-    useState(false);
-
-  const [previousVisits, setPreviousVisits] =
-    useState(0);
-
-  const [search, setSearch] = useState("");
-
-  const [activeFilter, setActiveFilter] =
-    useState<FilterType>("All Visitors");
-
-  const [scannerOpen, setScannerOpen] =
-    useState(false);
-
-  const [sidebarOpen, setSidebarOpen] =
-    useState(false);
-
-  /*
-    =====================================================
-    ADMIN AUTHENTICATION
-    =====================================================
-  */
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const loggedIn =
-      window.sessionStorage.getItem("adminLoggedIn");
-
-    if (loggedIn === "true") {
-      setAuthChecking(false);
-    } else {
-      window.location.replace("/login");
+  const getAuthHeaders = (): Record<
+    string,
+    string
+  > => {
+    if (typeof window === "undefined") {
+      return {};
     }
-  }, []);
 
-  const handleLogout = () => {
-    sessionStorage.removeItem("adminLoggedIn");
-    sessionStorage.removeItem("userRole");
+    const token =
+      window.localStorage.getItem(
+        "access_token"
+      );
 
-    window.location.replace("/login");
+    return token
+      ? {
+          Authorization: `Bearer ${token}`,
+        }
+      : {};
   };
 
-  /*
-    =====================================================
-    FETCH VISITORS
-    =====================================================
-  */
+  // ====================================================
+  // LOGOUT
+  // ====================================================
+
+  const logout = () => {
+    if (
+      typeof window !== "undefined"
+    ) {
+      window.localStorage.removeItem(
+        "access_token"
+      );
+
+      window.localStorage.removeItem(
+        "user"
+      );
+
+      window.localStorage.removeItem(
+        "visitorUser"
+      );
+
+      window.localStorage.removeItem(
+        "visitorProfile"
+      );
+
+      window.sessionStorage.removeItem(
+        "adminLoggedIn"
+      );
+
+      window.sessionStorage.removeItem(
+        "visitorLoggedIn"
+      );
+
+      window.sessionStorage.removeItem(
+        "userRole"
+      );
+
+      window.location.replace(
+        "/login"
+      );
+    }
+  };
+
+  // ====================================================
+  // FORM
+  // ====================================================
+
+  const [formData, setFormData] =
+    useState({
+      name: "",
+      phone: "",
+      email: "",
+      person_to_visit: "",
+      purpose: "",
+    });
+
+  // ====================================================
+  // VISITORS
+  // ====================================================
+
+  const [visitors, setVisitors] =
+    useState<Visitor[]>([]);
+
+  const [
+    selectedVisitor,
+    setSelectedVisitor,
+  ] = useState<Visitor | null>(
+    null
+  );
+
+  // ====================================================
+  // ANALYTICS
+  // ====================================================
+
+  const [analytics, setAnalytics] =
+    useState<Analytics | null>(
+      null
+    );
+
+  const [
+    analyticsLoading,
+    setAnalyticsLoading,
+  ] = useState(false);
+
+  // ====================================================
+  // UI
+  // ====================================================
+
+  const [visitorId, setVisitorId] =
+    useState("");
+
+  const [
+    returningVisitor,
+    setReturningVisitor,
+  ] = useState(false);
+
+  const [
+    previousVisits,
+    setPreviousVisits,
+  ] = useState(0);
+
+  const [
+    registeredVisitorName,
+    setRegisteredVisitorName,
+  ] = useState("");
+
+  const [message, setMessage] =
+    useState("");
+
+  const [
+    registerWarning,
+    setRegisterWarning,
+  ] = useState("");
+
+  const [search, setSearch] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [
+    scannerOpen,
+    setScannerOpen,
+  ] = useState(false);
+
+  const [
+    sidebarOpen,
+    setSidebarOpen,
+  ] = useState(false);
+
+  const [
+    activeFilter,
+    setActiveFilter,
+  ] = useState<VisitorFilter>(
+    "All Visitors"
+  );
+
+  // ====================================================
+  // FETCH VISITORS
+  // ====================================================
 
   const fetchVisitors = async () => {
     try {
       setLoading(true);
 
       const response = await fetch(
-        `${API_BASE_URL}/visitors`
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to load visitors");
-      }
-
-      const data = await response.json();
-
-      setVisitors(data);
-    } catch (error) {
-      console.error("Fetch visitors error:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /*
-    =====================================================
-    FETCH ANALYTICS
-    =====================================================
-  */
-
-  const fetchAnalytics = async () => {
-    try {
-      setAnalyticsLoading(true);
-
-      const response = await fetch(
-        `${API_BASE_URL}/analytics`
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to load analytics");
-      }
-
-      const data = await response.json();
-
-      setAnalytics(data);
-    } catch (error) {
-      console.error(
-        "Fetch analytics error:",
-        error
-      );
-    } finally {
-      setAnalyticsLoading(false);
-    }
-  };
-
-  /*
-    =====================================================
-    INITIAL DASHBOARD LOAD
-    =====================================================
-  */
-
-  useEffect(() => {
-    if (!authChecking) {
-      fetchVisitors();
-      fetchAnalytics();
-    }
-  }, [authChecking]);
-
-  /*
-    =====================================================
-    REFRESH DASHBOARD
-    =====================================================
-  */
-
-  const refreshDashboard = async () => {
-    await Promise.all([
-      fetchVisitors(),
-      fetchAnalytics(),
-    ]);
-  };
-
-  /*
-    =====================================================
-    FORM INPUT
-    =====================================================
-  */
-
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    setRegisterWarning("");
-
-    const { name, value } = e.target;
-
-    if (name === "phone") {
-      const onlyNumbers = value
-        .replace(/\D/g, "")
-        .slice(0, 10);
-
-      setFormData((previous) => ({
-        ...previous,
-        phone: onlyNumbers,
-      }));
-
-      return;
-    }
-
-    setFormData((previous) => ({
-      ...previous,
-      [name]: value,
-    }));
-  };
-
-  /*
-    =====================================================
-    REGISTER VISITOR
-    =====================================================
-  */
-
-  const registerVisitor = async (
-    e: FormEvent<HTMLFormElement>
-  ) => {
-    e.preventDefault();
-
-    setMessage("");
-    setRegisterWarning("");
-
-    const phone = formData.phone.trim();
-    const email = formData.email
-      .trim()
-      .toLowerCase();
-
-    /*
-      PHONE VALIDATION
-    */
-
-    if (!/^\d{10}$/.test(phone)) {
-      setMessage(
-        "Phone number must contain exactly 10 digits."
-      );
-
-      setRegisterWarning(
-        "⚠️ Phone number must contain exactly 10 digits."
-      );
-
-      return;
-    }
-
-    /*
-      GMAIL VALIDATION
-    */
-
-    if (
-      !/^[A-Za-z0-9._%+-]+@gmail\.com$/i.test(
-        email
-      )
-    ) {
-      setMessage(
-        "Please enter a valid Gmail address ending with @gmail.com."
-      );
-
-      setRegisterWarning(
-        "⚠️ Please enter a valid Gmail address ending with @gmail.com."
-      );
-
-      return;
-    }
-
-    try {
-      setLoading(true);
-
-      setMessage("Registering visitor...");
-
-      const response = await fetch(
-        `${API_BASE_URL}/register`,
+        `${API_BASE_URL}/visitors`,
         {
-          method: "POST",
-
           headers: {
-            "Content-Type": "application/json",
+            ...getAuthHeaders(),
+            "Cache-Control": "no-cache",
           },
-
-          body: JSON.stringify({
-            ...formData,
-            phone,
-            email,
-          }),
+          cache: "no-store",
         }
       );
 
-      const data = await response.json();
-
-      /*
-        =================================================
-        EXISTING PENDING VISIT
-        =================================================
-      */
-
-      if (
-        response.status === 409 &&
-        data.detail?.code ===
-          "VISITOR_REGISTRATION_INCOMPLETE"
-      ) {
-        setVisitorId("");
-        setReturningVisitor(false);
-        setPreviousVisits(0);
-        setRegisteredVisitorName("");
-
-        setMessage(
-          `⚠️ ${data.detail.message}`
-        );
-
-        setRegisterWarning(
-          `⚠️ Registration blocked. ${data.detail.message} Complete the current visit before registering again.`
-        );
-
-        return;
-      }
-
-      /*
-        =================================================
-        VISITOR ALREADY INSIDE
-        =================================================
-      */
-
-      if (
-        response.status === 409 &&
-        data.detail?.code ===
-          "VISITOR_ALREADY_INSIDE"
-      ) {
-        setVisitorId("");
-        setReturningVisitor(false);
-        setPreviousVisits(0);
-        setRegisteredVisitorName("");
-
-        setMessage(
-          `⚠️ ${data.detail.message}`
-        );
-
-        setRegisterWarning(
-          `⚠️ Registration blocked. ${data.detail.message} Please check out the current visit before registering a new visit.`
-        );
-
-        return;
-      }
-
-      /*
-        =================================================
-        OTHER API ERRORS
-        =================================================
-      */
-
       if (!response.ok) {
-        const errorMessage =
-          typeof data.detail === "string"
-            ? data.detail
-            : data.detail?.message ||
-              "Registration failed.";
-
-        setMessage(errorMessage);
-
-        setRegisterWarning(
-          `⚠️ ${errorMessage}`
-        );
-
-        return;
-      }
-
-      /*
-        =================================================
-        SUCCESS
-        =================================================
-      */
-
-      setVisitorId(
-        data.visitor_id || ""
-      );
-
-      setReturningVisitor(
-        Boolean(data.returning_visitor)
-      );
-
-      setPreviousVisits(
-        Number(data.previous_visits || 0)
-      );
-
-      setRegisteredVisitorName(
-        data.visitor?.name ||
-          data.visitor_name ||
-          formData.name
-      );
-
-      if (data.returning_visitor) {
-        setMessage(
-          `Welcome back, ${
-            data.visitor_name ||
-            data.visitor?.name ||
-            formData.name
-          }! Previous visits: ${
-            data.previous_visits || 0
-          }. New visit registered successfully.`
-        );
-      } else {
-        setMessage(
-          "Visitor registered successfully!"
+        throw new Error(
+          "Failed to fetch visitors"
         );
       }
 
-      setFormData({
-        name: "",
-        phone: "",
-        email: "",
-        person_to_visit: "",
-        purpose: "",
-      });
+      const data =
+        await response.json();
 
-      await refreshDashboard();
+      setVisitors(data);
     } catch (error) {
       console.error(
-        "Registration error:",
+        "Visitor fetch error:",
         error
-      );
-
-      setMessage(
-        "Cannot connect to backend."
-      );
-
-      setRegisterWarning(
-        "⚠️ Cannot connect to backend. Please check that the Render backend is running."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  /*
-    =====================================================
-    LOAD SINGLE VISITOR
-    =====================================================
-  */
+  // ====================================================
+  // FETCH ANALYTICS
+  // ====================================================
 
-  const loadVisitor = async (id: string) => {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/visitor/${id}`
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessage(
-          data.detail || "Visitor not found."
+  const fetchAnalytics =
+    async () => {
+      try {
+        setAnalyticsLoading(
+          true
         );
 
-        return;
-      }
+        const response =
+          await fetch(
+            `${API_BASE_URL}/analytics`,
+            {
+              headers: {
+                ...getAuthHeaders(),
+                "Cache-Control":
+                  "no-cache",
+              },
+              cache: "no-store",
+            }
+          );
 
-      setSelectedVisitor(data);
+        if (!response.ok) {
+          throw new Error(
+            "Failed to fetch analytics"
+          );
+        }
+
+        const data =
+          await response.json();
+
+        setAnalytics(data);
+      } catch (error) {
+        console.error(
+          "Analytics error:",
+          error
+        );
+      } finally {
+        setAnalyticsLoading(
+          false
+        );
+      }
+    };
+
+  // ====================================================
+  // LOAD SINGLE VISITOR
+  // ====================================================
+
+  const loadVisitor = async (
+    id: string
+  ) => {
+    if (!id) {
+      return;
+    }
+
+    try {
+      const response =
+        await fetch(
+          `${API_BASE_URL}/visitor/${id}`,
+          {
+            method: "GET",
+            headers: {
+              ...getAuthHeaders(),
+              "Cache-Control":
+                "no-cache",
+              Pragma: "no-cache",
+            },
+            cache: "no-store",
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (
+        response.ok &&
+        data.visitor_id
+      ) {
+        setSelectedVisitor(
+          data
+        );
+
+        if (
+          typeof window !==
+          "undefined"
+        ) {
+          window.localStorage.setItem(
+            "last_visitor_id",
+            data.visitor_id
+          );
+        }
+      } else {
+        setMessage(
+          typeof data.detail ===
+            "string"
+            ? data.detail
+            : "Visitor not found."
+        );
+      }
     } catch (error) {
       console.error(
         "Load visitor error:",
@@ -533,27 +411,641 @@ export default function Home() {
       );
 
       setMessage(
-        "Unable to connect to backend."
+        "Unable to load visitor."
       );
     }
   };
 
-  /*
-    =====================================================
-    CHECK IN
-    =====================================================
-  */
+  // ====================================================
+  // LOAD SAVED VISITOR AFTER LOGIN
+  // ====================================================
 
-  const checkIn = async (id: string) => {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/check-in/${id}`,
-        {
-          method: "POST",
-        }
+  const loadSavedVisitor =
+    async () => {
+      if (
+        typeof window ===
+        "undefined"
+      ) {
+        return;
+      }
+
+      const savedVisitorId =
+        window.localStorage.getItem(
+          "last_visitor_id"
+        );
+
+      if (!savedVisitorId) {
+        return;
+      }
+
+      setVisitorId(
+        savedVisitorId
       );
 
-      const data = await response.json();
+      await loadVisitor(
+        savedVisitorId
+      );
+    };
+
+  // ====================================================
+  // INITIAL AUTHENTICATION
+  // ====================================================
+
+  useEffect(() => {
+    const initializeAuth =
+      async () => {
+        if (
+          typeof window ===
+          "undefined"
+        ) {
+          return;
+        }
+
+        const token =
+          window.localStorage.getItem(
+            "access_token"
+          );
+
+        if (!token) {
+          window.location.href =
+            "/login";
+
+          return;
+        }
+
+        try {
+          const response =
+            await fetch(
+              `${API_BASE_URL}/auth/me`,
+              {
+                headers:
+                  getAuthHeaders(),
+                cache: "no-store",
+              }
+            );
+
+          if (!response.ok) {
+            throw new Error(
+              "Authentication expired"
+            );
+          }
+
+          const user =
+            await response.json();
+
+          setAuthUser(user);
+
+          setUserRole(
+            user.role === "admin"
+              ? "admin"
+              : "visitor"
+          );
+
+          window.localStorage.setItem(
+            "user",
+            JSON.stringify(user)
+          );
+
+          if (
+            user.role !== "admin"
+          ) {
+            setFormData(
+              (previous) => ({
+                ...previous,
+                name:
+                  user.name ||
+                  "",
+                phone:
+                  String(
+                    user.phone ||
+                      ""
+                  ).replace(
+                    /\D/g,
+                    ""
+                  ),
+                email:
+                  String(
+                    user.email ||
+                      ""
+                  )
+                    .trim()
+                    .toLowerCase(),
+              })
+            );
+          }
+
+          if (
+            user.role ===
+            "admin"
+          ) {
+            await Promise.all([
+              fetchVisitors(),
+              fetchAnalytics(),
+            ]);
+          } else {
+            await loadSavedVisitor();
+          }
+        } catch (error) {
+          console.error(
+            "Authentication error:",
+            error
+          );
+
+          window.localStorage.removeItem(
+            "access_token"
+          );
+
+          window.localStorage.removeItem(
+            "user"
+          );
+
+          window.sessionStorage.removeItem(
+            "adminLoggedIn"
+          );
+
+          window.sessionStorage.removeItem(
+            "visitorLoggedIn"
+          );
+
+          window.sessionStorage.removeItem(
+            "userRole"
+          );
+
+          window.location.href =
+            "/login";
+
+          return;
+        } finally {
+          setAuthReady(true);
+        }
+      };
+
+    initializeAuth();
+  }, []);
+
+  // ====================================================
+  // AUTOMATIC VISITOR STATUS REFRESH
+  // ====================================================
+
+  useEffect(() => {
+    if (
+      !authReady ||
+      userRole !== "visitor" ||
+      !visitorId
+    ) {
+      return;
+    }
+
+    // Get the newest status immediately.
+    loadVisitor(visitorId);
+
+    // Continue checking every 5 seconds.
+    const intervalId =
+      window.setInterval(() => {
+        loadVisitor(visitorId);
+      }, 5000);
+
+    return () => {
+      window.clearInterval(
+        intervalId
+      );
+    };
+  }, [
+    authReady,
+    userRole,
+    visitorId,
+  ]);
+
+  // ====================================================
+  // REFRESH DASHBOARD
+  // ====================================================
+
+  const refreshDashboard =
+    async () => {
+      if (
+        userRole !== "admin"
+      ) {
+        return;
+      }
+
+      await Promise.all([
+        fetchVisitors(),
+        fetchAnalytics(),
+      ]);
+    };
+
+  // ====================================================
+  // FORM CHANGE
+  // ====================================================
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    setRegisterWarning("");
+
+    const {
+      name,
+      value,
+    } = e.target;
+
+    if (name === "phone") {
+      const digitsOnly =
+        value
+          .replace(/\D/g, "")
+          .slice(0, 10);
+
+      setFormData({
+        ...formData,
+        phone: digitsOnly,
+      });
+
+      return;
+    }
+
+    if (name === "email") {
+      setFormData({
+        ...formData,
+        email:
+          value
+            .trim()
+            .toLowerCase(),
+      });
+
+      return;
+    }
+
+    setFormData({
+      ...formData,
+      [name]: value,
+    });
+  };
+
+  // ====================================================
+  // REGISTER VISITOR
+  // ====================================================
+
+  const registerVisitor =
+    async (
+      e: React.FormEvent<HTMLFormElement>
+    ) => {
+      e.preventDefault();
+
+      setRegisterWarning("");
+      setMessage("");
+
+      const visitorPhone =
+        userRole === "visitor"
+          ? String(
+              authUser?.phone ||
+                formData.phone ||
+                ""
+            )
+              .replace(
+                /\D/g,
+                ""
+              )
+              .slice(0, 10)
+          : String(
+              formData.phone || ""
+            )
+              .replace(
+                /\D/g,
+                ""
+              )
+              .slice(0, 10);
+
+      const visitorEmail =
+        userRole === "visitor"
+          ? String(
+              authUser?.email ||
+                formData.email ||
+                ""
+            )
+              .trim()
+              .toLowerCase()
+          : String(
+              formData.email || ""
+            )
+              .trim()
+              .toLowerCase();
+
+      const visitorName =
+        userRole === "visitor"
+          ? String(
+              authUser?.name ||
+                formData.name ||
+                ""
+            ).trim()
+          : String(
+              formData.name || ""
+            ).trim();
+
+      const personToVisit =
+        String(
+          formData.person_to_visit ||
+            ""
+        ).trim();
+
+      const purpose =
+        String(
+          formData.purpose || ""
+        ).trim();
+
+      if (
+        !/^\d{10}$/.test(
+          visitorPhone
+        )
+      ) {
+        setMessage(
+          "Phone number must contain exactly 10 digits."
+        );
+
+        setRegisterWarning(
+          "⚠️ Phone number must contain exactly 10 digits."
+        );
+
+        return;
+      }
+
+      if (
+        !/^[A-Za-z0-9._%+-]+@gmail\.com$/i.test(
+          visitorEmail
+        )
+      ) {
+        setMessage(
+          "Please enter a valid Gmail address ending with @gmail.com."
+        );
+
+        setRegisterWarning(
+          "⚠️ Please enter a valid Gmail address ending with @gmail.com."
+        );
+
+        return;
+      }
+
+      if (!visitorName) {
+        setMessage(
+          "Visitor name is required."
+        );
+
+        setRegisterWarning(
+          "⚠️ Visitor name is required."
+        );
+
+        return;
+      }
+
+      if (!personToVisit) {
+        setMessage(
+          "Please enter the person you want to visit."
+        );
+
+        setRegisterWarning(
+          "⚠️ Please enter the person you want to visit."
+        );
+
+        return;
+      }
+
+      if (!purpose) {
+        setMessage(
+          "Please enter the purpose of your visit."
+        );
+
+        setRegisterWarning(
+          "⚠️ Please enter the purpose of your visit."
+        );
+
+        return;
+      }
+
+      const registrationPayload = {
+        name: visitorName,
+        phone: visitorPhone,
+        email: visitorEmail,
+        person_to_visit:
+          personToVisit,
+        purpose: purpose,
+      };
+
+      console.log(
+        "Visitor registration payload:",
+        registrationPayload
+      );
+
+      setMessage(
+        "Registering visitor..."
+      );
+
+      try {
+        const response =
+          await fetch(
+            `${API_BASE_URL}/register`,
+            {
+              method: "POST",
+
+              headers: {
+                "Content-Type":
+                  "application/json",
+
+                ...getAuthHeaders(),
+              },
+
+              body: JSON.stringify(
+                registrationPayload
+              ),
+            }
+          );
+
+        const data =
+          await response.json();
+
+        if (!response.ok) {
+          if (
+            response.status ===
+              409 &&
+            data.detail?.code ===
+              "VISITOR_REGISTRATION_INCOMPLETE"
+          ) {
+            setVisitorId("");
+            setReturningVisitor(
+              false
+            );
+            setPreviousVisits(0);
+            setRegisteredVisitorName(
+              ""
+            );
+
+            setMessage(
+              `⚠️ ${data.detail.message}`
+            );
+
+            setRegisterWarning(
+              `⚠️ Registration blocked. ${data.detail.message} Complete the current visit before registering again.`
+            );
+
+            return;
+          }
+
+          if (
+            response.status ===
+              409 &&
+            data.detail?.code ===
+              "VISITOR_ALREADY_INSIDE"
+          ) {
+            setVisitorId("");
+            setReturningVisitor(
+              false
+            );
+            setPreviousVisits(0);
+            setRegisteredVisitorName(
+              ""
+            );
+
+            setMessage(
+              `⚠️ ${data.detail.message}`
+            );
+
+            setRegisterWarning(
+              `⚠️ Registration blocked. ${data.detail.message} Please check out the current visit before registering a new visit.`
+            );
+
+            return;
+          }
+
+          const errorMessage =
+            typeof data.detail ===
+            "string"
+              ? data.detail
+              : data.detail?.message ||
+                "Registration failed.";
+
+          setMessage(
+            errorMessage
+          );
+
+          setRegisterWarning(
+            `⚠️ ${errorMessage}`
+          );
+
+          return;
+        }
+
+        setRegisterWarning("");
+
+        setVisitorId(
+          data.visitor_id
+        );
+
+        if (
+          typeof window !==
+          "undefined"
+        ) {
+          window.localStorage.setItem(
+            "last_visitor_id",
+            data.visitor_id
+          );
+        }
+
+        setReturningVisitor(
+          Boolean(
+            data.returning_visitor
+          )
+        );
+
+        setPreviousVisits(
+          Number(
+            data.previous_visits ||
+              0
+          )
+        );
+
+        setRegisteredVisitorName(
+          data.visitor?.name ||
+            visitorName
+        );
+
+        await loadVisitor(
+          data.visitor_id
+        );
+
+        if (
+          data.returning_visitor
+        ) {
+          setMessage(
+            `Welcome back, ${
+              data.visitor_name ||
+              data.visitor?.name ||
+              visitorName
+            }! Previous visits: ${Number(
+              data.previous_visits ||
+                0
+            )}. New visit registered successfully.`
+          );
+        } else {
+          setMessage(
+            "Visitor registered successfully! Waiting for host approval."
+          );
+        }
+
+        if (
+          userRole === "visitor"
+        ) {
+          setFormData({
+            name:
+              authUser?.name ||
+              visitorName,
+            phone:
+              visitorPhone,
+            email:
+              visitorEmail,
+            person_to_visit: "",
+            purpose: "",
+          });
+        } else {
+          setFormData({
+            name: "",
+            phone: "",
+            email: "",
+            person_to_visit: "",
+            purpose: "",
+          });
+        }
+
+        setActiveFilter(
+          "All Visitors"
+        );
+
+        await refreshDashboard();
+      } catch (error) {
+        console.error(error);
+
+        setMessage(
+          "Cannot connect to backend."
+        );
+      }
+    };
+
+  // ====================================================
+  // CHECK IN
+  // ====================================================
+
+  const checkIn = async (
+    id: string
+  ) => {
+    try {
+      const response =
+        await fetch(
+          `${API_BASE_URL}/check-in/${id}`,
+          {
+            method: "POST",
+            headers:
+              getAuthHeaders(),
+          }
+        );
+
+      const data =
+        await response.json();
 
       setMessage(
         data.message ||
@@ -561,33 +1053,37 @@ export default function Home() {
       );
 
       await refreshDashboard();
+
       await loadVisitor(id);
     } catch (error) {
-      console.error(
-        "Check-in error:",
-        error
-      );
+      console.error(error);
 
-      setMessage("Check-in failed.");
+      setMessage(
+        "Check-in failed."
+      );
     }
   };
 
-  /*
-    =====================================================
-    CHECK OUT
-    =====================================================
-  */
+  // ====================================================
+  // CHECK OUT
+  // ====================================================
 
-  const checkOut = async (id: string) => {
+  const checkOut = async (
+    id: string
+  ) => {
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/check-out/${id}`,
-        {
-          method: "POST",
-        }
-      );
+      const response =
+        await fetch(
+          `${API_BASE_URL}/check-out/${id}`,
+          {
+            method: "POST",
+            headers:
+              getAuthHeaders(),
+          }
+        );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       setMessage(
         data.message ||
@@ -595,235 +1091,788 @@ export default function Home() {
       );
 
       await refreshDashboard();
+
       await loadVisitor(id);
     } catch (error) {
-      console.error(
-        "Check-out error:",
-        error
-      );
+      console.error(error);
 
-      setMessage("Check-out failed.");
+      setMessage(
+        "Check-out failed."
+      );
     }
   };
 
-  /*
-    =====================================================
-    QR SCANNER
-    =====================================================
-  */
+  // ====================================================
+  // HOST APPROVAL
+  // ====================================================
 
-  const startScanner = async () => {
-    setScannerOpen(true);
-
-    setTimeout(async () => {
+  const approveVisitor =
+    async (id: string) => {
       try {
-        const {
-          Html5Qrcode,
-        } = await import(
-          "html5-qrcode"
-        );
-
-        const scanner =
-          new Html5Qrcode(
-            "qr-reader"
+        const response =
+          await fetch(
+            `${API_BASE_URL}/visitor/${id}/approve`,
+            {
+              method: "POST",
+              headers:
+                getAuthHeaders(),
+            }
           );
 
-        await scanner.start(
-          {
-            facingMode: "environment",
-          },
-          {
-            fps: 10,
+        const data =
+          await response.json();
 
-            qrbox: {
-              width: 250,
-              height: 250,
-            },
-          },
+        if (!response.ok) {
+          setMessage(
+            typeof data.detail ===
+              "string"
+              ? data.detail
+              : "Approval failed."
+          );
 
-          async (decodedText) => {
-            try {
-              await scanner.stop();
-            } catch {}
-
-            setScannerOpen(false);
-
-            let id =
-              decodedText.trim();
-
-            if (
-              id.startsWith("VISITOR:")
-            ) {
-              id = id.replace(
-                "VISITOR:",
-                ""
-              );
-            }
-
-            await loadVisitor(id);
-          },
-
-          () => {}
-        );
-      } catch (error) {
-        console.error(
-          "QR scanner error:",
-          error
-        );
-
-        setScannerOpen(false);
+          return;
+        }
 
         setMessage(
-          "Unable to access camera. Please allow camera permission."
+          "Visitor request approved successfully. QR is now active. Approval email with QR is being sent to the visitor."
+        );
+
+        await refreshDashboard();
+
+        if (
+          selectedVisitor?.visitor_id ===
+          id
+        ) {
+          await loadVisitor(id);
+        }
+      } catch (error) {
+        console.error(error);
+
+        setMessage(
+          "Approval failed."
         );
       }
-    }, 300);
-  };
+    };
 
-  /*
-    =====================================================
-    DASHBOARD COUNTS
-    =====================================================
-  */
+  const rejectVisitor =
+    async (id: string) => {
+      try {
+        const response =
+          await fetch(
+            `${API_BASE_URL}/visitor/${id}/reject`,
+            {
+              method: "POST",
+              headers:
+                getAuthHeaders(),
+            }
+          );
 
-  const totalVisitors =
-    analytics?.total_visitors ??
+        const data =
+          await response.json();
+
+        if (!response.ok) {
+          setMessage(
+            typeof data.detail ===
+              "string"
+              ? data.detail
+              : "Rejection failed."
+          );
+
+          return;
+        }
+
+        setMessage(
+          "Visitor request rejected. A notification email will be sent to the visitor."
+        );
+
+        await refreshDashboard();
+
+        if (
+          selectedVisitor?.visitor_id ===
+          id
+        ) {
+          await loadVisitor(id);
+        }
+      } catch (error) {
+        console.error(error);
+
+        setMessage(
+          "Rejection failed."
+        );
+      }
+    };
+
+  // ====================================================
+  // QR SCANNER
+  // ====================================================
+
+  const startScanner =
+    async () => {
+      setScannerOpen(true);
+
+      setTimeout(
+        async () => {
+          try {
+            const {
+              Html5Qrcode,
+            } = await import(
+              "html5-qrcode"
+            );
+
+            const scanner =
+              new Html5Qrcode(
+                "qr-reader"
+              );
+
+            await scanner.start(
+              {
+                facingMode:
+                  "environment",
+              },
+              {
+                fps: 10,
+                qrbox: {
+                  width: 250,
+                  height: 250,
+                },
+              },
+              async (
+                decodedText
+              ) => {
+                try {
+                  await scanner.stop();
+                } catch {}
+
+                setScannerOpen(
+                  false
+                );
+
+                let id =
+                  decodedText;
+
+                if (
+                  decodedText.startsWith(
+                    "VISITOR:"
+                  )
+                ) {
+                  id =
+                    decodedText.replace(
+                      "VISITOR:",
+                      ""
+                    );
+                }
+
+                await loadVisitor(
+                  id
+                );
+              },
+              () => {}
+            );
+          } catch (error) {
+            console.error(
+              "Scanner error:",
+              error
+            );
+
+            setScannerOpen(
+              false
+            );
+
+            setMessage(
+              "Unable to access camera. Please allow camera permission."
+            );
+          }
+        },
+        300
+      );
+    };
+
+  // ====================================================
+  // COUNTS
+  // ====================================================
+
+  const allVisitorsCount =
     visitors.length;
 
-  const currentlyInside =
-    analytics?.currently_inside ??
+  const checkedInCount =
     visitors.filter(
       (visitor) =>
         visitor.status ===
         "Checked In"
     ).length;
 
-  const checkedOut =
-    analytics?.checked_out ??
+  const checkedOutCount =
     visitors.filter(
       (visitor) =>
         visitor.status ===
         "Checked Out"
     ).length;
 
-  const notCheckedIn =
-    analytics?.pending ??
+  const notCheckedInCount =
     visitors.filter(
       (visitor) =>
         visitor.status ===
         "Not Checked In"
     ).length;
 
-  /*
-    =====================================================
-    SEARCH + FILTER
-    =====================================================
-  */
+  const pendingApprovalCount =
+    visitors.filter(
+      (visitor) =>
+        visitor.approval_status ===
+        "Pending Approval"
+    ).length;
+
+  // ====================================================
+  // FILTER
+  // ====================================================
 
   const filteredVisitors =
-    visitors.filter((visitor) => {
-      const searchText =
-        search.toLowerCase().trim();
+    visitors.filter(
+      (visitor) => {
+        const value =
+          search
+            .toLowerCase()
+            .trim();
 
-      const matchesSearch =
-        searchText === "" ||
-        visitor.name
-          .toLowerCase()
-          .includes(searchText) ||
-        visitor.phone.includes(
-          searchText
-        ) ||
-        visitor.email
-          .toLowerCase()
-          .includes(searchText) ||
-        visitor.purpose
-          .toLowerCase()
-          .includes(searchText) ||
-        visitor.person_to_visit
-          .toLowerCase()
-          .includes(searchText);
+        const matchesSearch =
+          value === "" ||
+          visitor.name
+            .toLowerCase()
+            .includes(value) ||
+          visitor.phone.includes(
+            search
+          ) ||
+          visitor.email
+            .toLowerCase()
+            .includes(value) ||
+          visitor.purpose
+            .toLowerCase()
+            .includes(value) ||
+          visitor.person_to_visit
+            .toLowerCase()
+            .includes(value);
 
-      const matchesFilter =
-        activeFilter ===
-          "All Visitors" ||
-        visitor.status ===
-          activeFilter;
+        const matchesFilter =
+          activeFilter ===
+            "All Visitors" ||
+          visitor.status ===
+            activeFilter;
 
-      return (
-        matchesSearch &&
-        matchesFilter
-      );
-    });
+        return (
+          matchesSearch &&
+          matchesFilter
+        );
+      }
+    );
 
-  /*
-    =====================================================
-    DATE FORMAT
-    =====================================================
-  */
+  const filterButtons: {
+    label: VisitorFilter;
+    count: number;
+    icon: React.ReactNode;
+  }[] = [
+    {
+      label: "All Visitors",
+      count:
+        allVisitorsCount,
+      icon: (
+        <Users size={17} />
+      ),
+    },
+    {
+      label: "Checked In",
+      count:
+        checkedInCount,
+      icon: (
+        <UserCheck size={17} />
+      ),
+    },
+    {
+      label: "Checked Out",
+      count:
+        checkedOutCount,
+      icon: (
+        <LogOut size={17} />
+      ),
+    },
+    {
+      label: "Not Checked In",
+      count:
+        notCheckedInCount,
+      icon: (
+        <UserX size={17} />
+      ),
+    },
+  ];
+
+  // ====================================================
+  // DATE FORMAT
+  // ====================================================
 
   const formatDate = (
     value: string | null
   ) => {
-    if (!value) return "-";
+    if (!value) {
+      return "-";
+    }
 
     return new Date(
       value
     ).toLocaleString();
   };
 
-  /*
-    =====================================================
-    SIDEBAR NAVIGATION
-    =====================================================
-  */
+  // ====================================================
+  // NAVIGATION
+  // ====================================================
 
   const scrollToSection = (
     id: string
   ) => {
-    document
-      .getElementById(id)
-      ?.scrollIntoView({
+    const element =
+      document.getElementById(id);
+
+    if (element) {
+      element.scrollIntoView({
         behavior: "smooth",
         block: "start",
       });
+    }
 
     setSidebarOpen(false);
   };
 
-  /*
-    =====================================================
-    AUTH LOADING SCREEN
-    =====================================================
-  */
+  // ====================================================
+  // AUTH LOADING
+  // ====================================================
 
-  if (authChecking) {
+  if (!authReady) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-cyan-400/20 border-t-cyan-400" />
+      <div className="min-h-screen flex items-center justify-center bg-slate-100">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-8 py-6 text-center">
+          <ShieldCheck
+            className="mx-auto text-blue-600 mb-3"
+            size={36}
+          />
 
-          <p className="text-sm text-slate-400">
-            Verifying admin session...
+          <p className="font-semibold">
+            Checking your account...
           </p>
         </div>
-      </main>
+      </div>
     );
   }
 
-  /*
-    =====================================================
-    MAIN DASHBOARD
-    =====================================================
-  */
+  // ====================================================
+  // VISITOR PORTAL
+  // ====================================================
+
+  if (userRole === "visitor") {
+    const approvalStatus =
+      selectedVisitor?.approval_status ||
+      "Pending Approval";
+
+    const isApproved =
+      approvalStatus ===
+      "Approved";
+
+    const isRejected =
+      approvalStatus ===
+      "Rejected";
+
+    const isPending =
+      approvalStatus ===
+      "Pending Approval";
+
+    return (
+      <div className="min-h-screen bg-slate-100 text-slate-900 p-5 md:p-10">
+        <div className="max-w-4xl mx-auto">
+
+          {/* HEADER */}
+
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
+            <div>
+              <p className="text-sm text-slate-500">
+                Visitor Portal
+              </p>
+
+              <h1 className="text-3xl font-bold">
+                Welcome,{" "}
+                {authUser?.name}
+              </h1>
+
+              <p className="text-sm text-slate-500 mt-1">
+                Submit a visit request and
+                track host approval.
+              </p>
+            </div>
+
+            <button
+              onClick={logout}
+              className="bg-slate-950 text-white px-5 py-3 rounded-xl font-semibold flex items-center justify-center gap-2"
+            >
+              <LogOut size={18} />
+              Logout
+            </button>
+          </div>
+
+          {/* REGISTER VISIT */}
+
+          <section className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 mb-6">
+            <h2 className="text-xl font-bold mb-1">
+              Register Visit
+            </h2>
+
+            <p className="text-sm text-slate-500 mb-6">
+              Your account credentials are used
+              for this visitor request.
+            </p>
+
+            <form
+              onSubmit={
+                registerVisitor
+              }
+              className="grid grid-cols-1 md:grid-cols-2 gap-4"
+            >
+              <input
+                name="name"
+                value={
+                  authUser?.name ||
+                  formData.name ||
+                  ""
+                }
+                readOnly
+                placeholder="Full name"
+                required
+                className="border border-slate-200 bg-slate-50 rounded-xl px-4 py-3 cursor-not-allowed"
+              />
+
+              <input
+                name="phone"
+                value={
+                  String(
+                    authUser?.phone ||
+                      formData.phone ||
+                      ""
+                  ).replace(
+                    /\D/g,
+                    ""
+                  )
+                }
+                readOnly
+                inputMode="numeric"
+                placeholder="10-digit phone"
+                required
+                maxLength={10}
+                className="border border-slate-200 bg-slate-50 rounded-xl px-4 py-3 cursor-not-allowed"
+              />
+
+              <input
+                name="email"
+                type="email"
+                value={
+                  String(
+                    authUser?.email ||
+                      formData.email ||
+                      ""
+                  )
+                    .trim()
+                    .toLowerCase()
+                }
+                readOnly
+                placeholder="Gmail address"
+                required
+                className="border border-slate-200 bg-slate-50 rounded-xl px-4 py-3 cursor-not-allowed"
+              />
+
+              <input
+                name="person_to_visit"
+                value={
+                  formData.person_to_visit
+                }
+                onChange={
+                  handleChange
+                }
+                placeholder="Person to visit"
+                required
+                className="border border-slate-200 rounded-xl px-4 py-3"
+              />
+
+              <input
+                name="purpose"
+                value={
+                  formData.purpose
+                }
+                onChange={
+                  handleChange
+                }
+                placeholder="Purpose of visit"
+                required
+                className="border border-slate-200 rounded-xl px-4 py-3 md:col-span-2"
+              />
+
+              <button
+                type="submit"
+                className="md:col-span-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 font-semibold"
+              >
+                Submit Visit Request
+              </button>
+            </form>
+          </section>
+
+          {/* MESSAGE */}
+
+          {message && (
+            <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-xl p-4 mb-6">
+              {message}
+            </div>
+          )}
+
+          {/* VISITOR STATUS */}
+
+          {visitorId && (
+            <section className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
+
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <p className="text-sm text-slate-500">
+                    Visit Request
+                  </p>
+
+                  <p className="font-mono text-xs break-all mt-1">
+                    {visitorId}
+                  </p>
+
+                  {/* LIVE STATUS INDICATOR */}
+
+                  <p className="text-xs text-slate-400 mt-2 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                    Status updates automatically
+                  </p>
+                </div>
+
+                <button
+                  onClick={() =>
+                    loadVisitor(
+                      visitorId
+                    )
+                  }
+                  className="border border-slate-200 px-4 py-2 rounded-xl font-semibold hover:bg-slate-50"
+                >
+                  <span className="flex items-center gap-2">
+                    <RefreshCw
+                      size={16}
+                    />
+                    Refresh Status
+                  </span>
+                </button>
+              </div>
+
+              {/* PENDING */}
+
+              {isPending && (
+                <div className="mt-5 bg-amber-50 border border-amber-200 rounded-2xl p-5">
+                  <div className="flex items-start gap-3">
+                    <Clock3
+                      className="text-amber-600 mt-0.5"
+                      size={24}
+                    />
+
+                    <div>
+                      <p className="font-bold text-amber-800">
+                        Pending Host Approval
+                      </p>
+
+                      <p className="text-sm text-amber-700 mt-1">
+                        Your visit request has
+                        been submitted successfully.
+                        Please wait for the host
+                        to approve or reject it.
+                      </p>
+
+                      <p className="text-xs text-amber-600 mt-2">
+                        This page automatically checks
+                        for approval updates.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* APPROVED */}
+
+              {isApproved && (
+                <div className="mt-5 bg-green-50 border border-green-200 rounded-2xl p-5">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle2
+                      className="text-green-600 mt-0.5"
+                      size={26}
+                    />
+
+                    <div>
+                      <p className="font-bold text-green-800 text-lg">
+                        Visit Approved
+                      </p>
+
+                      <p className="text-sm text-green-700 mt-1">
+                        Your host has approved your
+                        visit request.
+                      </p>
+
+                      <p className="text-sm text-green-700 mt-2">
+                        An approval email containing
+                        your QR code has been sent
+                        to your Gmail address.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3 mt-5">
+                    <a
+                      href={`${API_BASE_URL}/qr/${visitorId}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-xl font-semibold text-center"
+                    >
+                      View QR
+                    </a>
+
+                    <a
+                      href={`${API_BASE_URL}/qr/${visitorId}/download`}
+                      className="flex-1 bg-slate-950 hover:bg-slate-800 text-white px-4 py-3 rounded-xl font-semibold text-center"
+                    >
+                      Download QR
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* REJECTED */}
+
+              {isRejected && (
+                <div className="mt-5 bg-red-50 border border-red-200 rounded-2xl p-5">
+                  <div className="flex items-start gap-3">
+                    <UserX
+                      className="text-red-600 mt-0.5"
+                      size={26}
+                    />
+
+                    <div>
+                      <p className="font-bold text-red-800 text-lg">
+                        Visit Request Rejected
+                      </p>
+
+                      <p className="text-sm text-red-700 mt-1">
+                        Unfortunately, your visit
+                        request was rejected by the
+                        host.
+                      </p>
+
+                      <p className="text-sm text-red-700 mt-2">
+                        A notification email has been
+                        sent to your Gmail address.
+                      </p>
+
+                      <p className="text-xs text-red-600 mt-3">
+                        Thank you for using AI Smart
+                        Visitor Management System.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* CURRENT VISIT DETAILS */}
+
+              {selectedVisitor &&
+                selectedVisitor.visitor_id ===
+                  visitorId && (
+                  <div className="mt-6 border-t border-slate-200 pt-5">
+                    <h3 className="font-bold text-lg mb-4">
+                      Visit Details
+                    </h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                      <div className="bg-slate-50 rounded-xl p-3">
+                        <p className="text-slate-500">
+                          Visitor
+                        </p>
+
+                        <p className="font-semibold">
+                          {
+                            selectedVisitor.name
+                          }
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 rounded-xl p-3">
+                        <p className="text-slate-500">
+                          Person to Visit
+                        </p>
+
+                        <p className="font-semibold">
+                          {
+                            selectedVisitor.person_to_visit
+                          }
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 rounded-xl p-3">
+                        <p className="text-slate-500">
+                          Purpose
+                        </p>
+
+                        <p className="font-semibold">
+                          {
+                            selectedVisitor.purpose
+                          }
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 rounded-xl p-3">
+                        <p className="text-slate-500">
+                          Visit Status
+                        </p>
+
+                        <p className="font-semibold">
+                          {
+                            selectedVisitor.status
+                          }
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 rounded-xl p-3">
+                        <p className="text-slate-500">
+                          Approval Status
+                        </p>
+
+                        <p className="font-semibold">
+                          {
+                            selectedVisitor.approval_status ||
+                            "Pending Approval"
+                          }
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+            </section>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ====================================================
+  // ADMIN DASHBOARD
+  // ====================================================
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
 
       {/* MOBILE HEADER */}
 
-      <header className="sticky top-0 z-40 flex items-center justify-between bg-slate-950 px-5 py-4 text-white shadow-lg lg:hidden">
+      <header className="lg:hidden sticky top-0 z-40 flex items-center justify-between bg-slate-950 text-white px-5 py-4 shadow-lg">
         <div>
-          <h1 className="text-lg font-bold">
+          <h1 className="font-bold text-lg">
             Smart Visitor
           </h1>
 
@@ -833,13 +1882,12 @@ export default function Home() {
         </div>
 
         <button
-          type="button"
           onClick={() =>
             setSidebarOpen(
               !sidebarOpen
             )
           }
-          className="rounded-lg p-2 hover:bg-slate-800"
+          className="p-2 rounded-lg hover:bg-slate-800"
         >
           {sidebarOpen ? (
             <X />
@@ -852,98 +1900,118 @@ export default function Home() {
       {/* SIDEBAR */}
 
       <aside
-        className={`fixed left-0 top-0 z-50 h-screen w-64 bg-slate-950 p-6 text-white transition-transform duration-300 ${
-          sidebarOpen
-            ? "translate-x-0"
-            : "-translate-x-full"
-        } lg:translate-x-0`}
+        className={`
+          fixed
+          z-50
+          left-0
+          top-0
+          h-screen
+          w-64
+          bg-slate-950
+          text-white
+          p-6
+          transition-transform
+          duration-300
+          lg:translate-x-0
+          ${
+            sidebarOpen
+              ? "translate-x-0"
+              : "-translate-x-full"
+          }
+        `}
       >
-        <div className="mb-10 flex items-center gap-3">
-          <div className="rounded-xl bg-blue-600 p-3">
-            <ShieldCheck size={25} />
-          </div>
+        <div className="mb-10">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-600 p-2.5 rounded-xl">
+              <ShieldCheck
+                size={25}
+              />
+            </div>
 
-          <div>
-            <h1 className="font-bold">
-              Smart Visitor
-            </h1>
+            <div>
+              <h1 className="font-bold text-lg">
+                Smart Visitor
+              </h1>
 
-            <p className="text-xs text-slate-400">
-              AI Management
-            </p>
+              <p className="text-xs text-slate-400">
+                AI Management
+              </p>
+            </div>
           </div>
         </div>
 
         <nav className="space-y-2">
-
           <button
-            type="button"
             onClick={() =>
               scrollToSection(
                 "dashboard"
               )
             }
-            className="flex w-full items-center gap-3 rounded-xl bg-blue-600 px-4 py-3 text-left"
+            className="w-full flex items-center gap-3 bg-blue-600 px-4 py-3 rounded-xl text-left"
           >
-            <LayoutDashboard size={19} />
+            <LayoutDashboard
+              size={19}
+            />
             Dashboard
           </button>
 
           <button
-            type="button"
             onClick={() =>
               scrollToSection(
                 "register"
               )
             }
-            className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-slate-400 hover:bg-slate-900 hover:text-white"
+            className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:bg-slate-900 hover:text-white rounded-xl text-left"
           >
             <UserPlus size={19} />
             Register Visitor
           </button>
 
           <button
-            type="button"
-            onClick={
-              startScanner
+            onClick={() =>
+              startScanner()
             }
-            className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-slate-400 hover:bg-slate-900 hover:text-white"
+            className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:bg-slate-900 hover:text-white rounded-xl text-left"
           >
             <ScanLine size={19} />
             QR Scanner
           </button>
 
           <button
-            type="button"
             onClick={() =>
               scrollToSection(
                 "analytics"
               )
             }
-            className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-slate-400 hover:bg-slate-900 hover:text-white"
+            className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:bg-slate-900 hover:text-white rounded-xl text-left"
           >
             <Brain size={19} />
             AI Analytics
           </button>
 
           <button
-            type="button"
             onClick={() =>
               scrollToSection(
                 "records"
               )
             }
-            className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-slate-400 hover:bg-slate-900 hover:text-white"
+            className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:bg-slate-900 hover:text-white rounded-xl text-left"
           >
             <Users size={19} />
             Visitor Records
           </button>
-
         </nav>
 
-        <div className="absolute bottom-6 left-6 right-6">
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-3 px-4 py-3 mt-6 text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-xl text-left transition"
+        >
+          <LogOut size={19} />
+          Logout
+        </button>
 
-          <div className="mb-3 rounded-2xl bg-slate-900 p-4">
+        <div className="absolute bottom-8 left-6 right-6">
+          <div className="bg-slate-900 rounded-2xl p-4">
             <div className="flex items-center gap-2 text-green-400">
               <Activity size={16} />
 
@@ -952,22 +2020,10 @@ export default function Home() {
               </span>
             </div>
 
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="text-xs text-slate-500 mt-2">
               AI Visitor Security
             </p>
           </div>
-
-          <button
-            type="button"
-            onClick={
-              handleLogout
-            }
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 font-semibold text-white hover:bg-red-700"
-          >
-            <LogOut size={18} />
-            Logout
-          </button>
-
         </div>
       </aside>
 
@@ -975,13 +2031,11 @@ export default function Home() {
 
       <main
         id="dashboard"
-        className="p-5 md:p-8 lg:ml-64"
+        className="lg:ml-64 p-5 md:p-8"
       >
-
         {/* TOP BAR */}
 
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
           <div>
             <p className="text-sm text-slate-500">
               Security Control Center
@@ -991,19 +2045,18 @@ export default function Home() {
               Visitor Dashboard
             </h2>
 
-            <p className="mt-1 text-sm text-slate-500">
-              Monitor visitor activity and security
+            <p className="text-sm text-slate-500 mt-1">
+              Monitor visitor activity and
+              security
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
-
+          <div className="flex gap-3">
             <button
-              type="button"
               onClick={
                 refreshDashboard
               }
-              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50"
+              className="flex items-center justify-center gap-2 border border-slate-200 bg-white px-4 py-3 rounded-xl hover:bg-slate-50"
             >
               <RefreshCw
                 size={18}
@@ -1019,97 +2072,246 @@ export default function Home() {
             </button>
 
             <button
-              type="button"
               onClick={
                 startScanner
               }
-              className="flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-white hover:bg-slate-800"
+              className="flex items-center justify-center gap-2 bg-slate-950 text-white px-5 py-3 rounded-xl hover:bg-slate-800 transition"
             >
               <ScanLine size={19} />
               Scan QR
             </button>
-
-            <button
-              type="button"
-              onClick={
-                handleLogout
-              }
-              className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700"
-            >
-              <LogOut size={19} />
-              Logout
-            </button>
-
           </div>
         </div>
 
         {/* MESSAGE */}
 
         {message && (
-          <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-5 py-4 text-blue-800">
-            {message}
+          <div
+            className={`mb-6 px-5 py-4 rounded-xl border ${
+              message.startsWith("⚠️")
+                ? "bg-amber-50 border-amber-300 text-amber-800"
+                : message
+                    .toLowerCase()
+                    .includes(
+                      "successfully"
+                    ) ||
+                  message
+                    .toLowerCase()
+                    .includes(
+                      "welcome back"
+                    )
+                ? "bg-green-50 border-green-300 text-green-800"
+                : "bg-blue-50 border-blue-200 text-blue-700"
+            }`}
+          >
+            <div className="font-medium">
+              {message}
+            </div>
           </div>
         )}
 
         {/* STATISTICS */}
 
-        <div className="mb-8 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-8">
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+            <div className="flex justify-between">
+              <div>
+                <p className="text-sm text-slate-500">
+                  Total Visitors
+                </p>
 
-          <StatCard
-            title="Total Visitors"
-            value={
-              totalVisitors
-            }
-            icon={<Users />}
-            iconClass="bg-blue-100 text-blue-600"
-          />
+                <p className="text-3xl font-bold mt-2">
+                  {analytics?.total_visitors ??
+                    0}
+                </p>
+              </div>
 
-          <StatCard
-            title="Currently Inside"
-            value={
-              currentlyInside
-            }
-            icon={<UserCheck />}
-            iconClass="bg-green-100 text-green-600"
-          />
+              <div className="bg-blue-100 text-blue-600 p-3 rounded-xl">
+                <Users />
+              </div>
+            </div>
+          </div>
 
-          <StatCard
-            title="Checked Out"
-            value={
-              checkedOut
-            }
-            icon={<LogOut />}
-            iconClass="bg-purple-100 text-purple-600"
-          />
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+            <div className="flex justify-between">
+              <div>
+                <p className="text-sm text-slate-500">
+                  Currently Inside
+                </p>
 
-          <StatCard
-            title="Security Alerts"
-            value={
-              analytics
-                ?.security_alerts
-                ?.length ?? 0
-            }
-            icon={
-              <AlertTriangle />
-            }
-            iconClass="bg-orange-100 text-orange-600"
-          />
+                <p className="text-3xl font-bold mt-2">
+                  {analytics?.currently_inside ??
+                    0}
+                </p>
+              </div>
 
+              <div className="bg-green-100 text-green-600 p-3 rounded-xl">
+                <UserCheck />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+            <div className="flex justify-between">
+              <div>
+                <p className="text-sm text-slate-500">
+                  Checked Out
+                </p>
+
+                <p className="text-3xl font-bold mt-2">
+                  {analytics?.checked_out ??
+                    0}
+                </p>
+              </div>
+
+              <div className="bg-purple-100 text-purple-600 p-3 rounded-xl">
+                <LogOut />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+            <div className="flex justify-between">
+              <div>
+                <p className="text-sm text-slate-500">
+                  Security Alerts
+                </p>
+
+                <p className="text-3xl font-bold mt-2">
+                  {analytics
+                    ?.security_alerts
+                    .length ?? 0}
+                </p>
+              </div>
+
+              <div className="bg-orange-100 text-orange-600 p-3 rounded-xl">
+                <AlertTriangle />
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* HOST APPROVAL */}
+
+        <section className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 mb-8">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-5">
+            <div>
+              <h3 className="text-xl font-bold">
+                Host Approval Requests
+              </h3>
+
+              <p className="text-sm text-slate-500 mt-1">
+                Review visitor requests before
+                activating their QR codes.
+              </p>
+            </div>
+
+            <div className="bg-amber-100 text-amber-800 px-4 py-2 rounded-xl font-bold text-sm">
+              {pendingApprovalCount}{" "}
+              Pending
+            </div>
+          </div>
+
+          {visitors.filter(
+            (visitor) =>
+              visitor.approval_status ===
+              "Pending Approval"
+          ).length === 0 ? (
+            <div className="bg-green-50 border border-green-200 rounded-2xl p-5 text-green-800">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 />
+
+                <div>
+                  <p className="font-semibold">
+                    No pending approval requests
+                  </p>
+
+                  <p className="text-sm mt-1">
+                    New visitor requests will
+                    appear here automatically.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {visitors
+                .filter(
+                  (visitor) =>
+                    visitor.approval_status ===
+                    "Pending Approval"
+                )
+                .map((visitor) => (
+                  <div
+                    key={
+                      visitor.visitor_id
+                    }
+                    className="border border-amber-200 bg-amber-50 rounded-2xl p-4"
+                  >
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                      <div>
+                        <p className="font-bold text-lg">
+                          {visitor.name}
+                        </p>
+
+                        <p className="text-sm text-slate-600">
+                          {visitor.email} •{" "}
+                          {visitor.phone}
+                        </p>
+
+                        <p className="text-sm text-slate-600 mt-1">
+                          Visiting:{" "}
+                          {
+                            visitor.person_to_visit
+                          }
+                        </p>
+
+                        <p className="text-sm text-slate-600">
+                          Purpose:{" "}
+                          {visitor.purpose}
+                        </p>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() =>
+                            approveVisitor(
+                              visitor.visitor_id
+                            )
+                          }
+                          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl font-semibold"
+                        >
+                          Approve
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            rejectVisitor(
+                              visitor.visitor_id
+                            )
+                          }
+                          className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-semibold"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
+        </section>
 
         {/* AI ANALYTICS */}
 
         <section
           id="analytics"
-          className="mb-8 rounded-3xl bg-slate-950 p-6 text-white md:p-8"
+          className="bg-slate-950 text-white rounded-3xl p-6 md:p-8 mb-8 shadow-xl"
         >
-
-          <div className="mb-8 flex items-center justify-between">
-
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
             <div className="flex items-center gap-4">
-
-              <div className="rounded-xl bg-blue-600 p-3">
-                <Brain size={27} />
+              <div className="bg-blue-600 p-3 rounded-2xl">
+                <Brain size={28} />
               </div>
 
               <div>
@@ -1117,136 +2319,124 @@ export default function Home() {
                   AI Security Analytics
                 </h3>
 
-                <p className="text-sm text-slate-400">
-                  Intelligent visitor activity monitoring
+                <p className="text-slate-400 text-sm">
+                  Intelligent visitor activity
+                  monitoring
                 </p>
               </div>
-
             </div>
 
-            <div className="hidden items-center gap-2 text-sm text-green-400 sm:flex">
-              <span className="h-2 w-2 rounded-full bg-green-400" />
+            <div className="flex items-center gap-2 text-green-400 text-sm">
+              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
               Analytics Active
             </div>
-
           </div>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {analytics && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="bg-slate-900 rounded-2xl p-6">
+                <div className="flex items-center gap-2 mb-5">
+                  <Clock3
+                    size={20}
+                    className="text-blue-400"
+                  />
 
-            {/* VISIT METRICS */}
-
-            <div className="rounded-2xl bg-slate-900 p-6">
-
-              <div className="mb-5 flex items-center gap-2">
-                <Clock3 className="text-blue-400" />
-
-                <h4 className="font-semibold">
-                  Visit Metrics
-                </h4>
-              </div>
-
-              <div className="space-y-5">
-
-                <div>
-                  <p className="text-sm text-slate-400">
-                    Average Visit
-                  </p>
-
-                  <p className="mt-1 text-2xl font-bold">
-                    {
-                      analytics?.average_visit_minutes ??
-                      0
-                    }
-
-                    <span className="text-sm text-slate-400">
-                      {" "}min
-                    </span>
-                  </p>
+                  <h4 className="font-semibold">
+                    Visit Metrics
+                  </h4>
                 </div>
 
-                <div>
-                  <p className="text-sm text-slate-400">
-                    Longest Visit
-                  </p>
+                <div className="space-y-5">
+                  <div>
+                    <p className="text-sm text-slate-400">
+                      Average Visit
+                    </p>
 
-                  <p className="mt-1 text-2xl font-bold">
-                    {
-                      analytics?.longest_visit_minutes ??
-                      0
-                    }
+                    <p className="text-2xl font-bold mt-1">
+                      {
+                        analytics.average_visit_minutes
+                      }
 
-                    <span className="text-sm text-slate-400">
-                      {" "}min
-                    </span>
-                  </p>
+                      <span className="text-sm text-slate-400 ml-1">
+                        min
+                      </span>
+                    </p>
+                  </div>
 
-                  <p className="mt-1 text-xs text-slate-500">
-                    {
-                      analytics?.longest_visit_name ||
-                      "-"
-                    }
-                  </p>
+                  <div>
+                    <p className="text-sm text-slate-400">
+                      Longest Visit
+                    </p>
+
+                    <p className="text-2xl font-bold mt-1">
+                      {
+                        analytics.longest_visit_minutes
+                      }
+
+                      <span className="text-sm text-slate-400 ml-1">
+                        min
+                      </span>
+                    </p>
+
+                    {analytics.longest_visit_name && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        {
+                          analytics.longest_visit_name
+                        }
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-sm text-slate-400">
+                      Most Visited Person
+                    </p>
+
+                    <p className="text-lg font-semibold mt-1">
+                      {analytics.most_visited_person ??
+                        "-"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-900 rounded-2xl p-6">
+                <div className="flex items-center gap-2 mb-5">
+                  <BarChart3
+                    size={20}
+                    className="text-purple-400"
+                  />
+
+                  <h4 className="font-semibold">
+                    Visitor Activity
+                  </h4>
                 </div>
 
-                <div>
-                  <p className="text-sm text-slate-400">
-                    Most Visited Person
-                  </p>
-
-                  <p className="mt-1 font-semibold">
-                    {
-                      analytics?.most_visited_person ||
-                      "-"
-                    }
-                  </p>
-                </div>
-
-              </div>
-            </div>
-
-            {/* VISITOR ACTIVITY */}
-
-            <div className="rounded-2xl bg-slate-900 p-6">
-
-              <div className="mb-5 flex items-center gap-2">
-                <BarChart3 className="text-purple-400" />
-
-                <h4 className="font-semibold">
-                  Visitor Activity
-                </h4>
-              </div>
-
-              <div className="space-y-4">
-
-                {analytics &&
-                  Object.entries(
+                <div className="space-y-4">
+                  {Object.entries(
                     analytics.person_visit_counts
                   ).map(
                     ([person, count]) => {
-
-                      const values =
-                        Object.values(
-                          analytics.person_visit_counts
+                      const maximum =
+                        Math.max(
+                          ...Object.values(
+                            analytics.person_visit_counts
+                          )
                         );
 
-                      const maximum =
-                        values.length > 0
-                          ? Math.max(
-                              ...values
-                            )
-                          : 1;
-
                       const width =
-                        (count /
-                          maximum) *
-                        100;
+                        maximum > 0
+                          ? (count /
+                              maximum) *
+                            100
+                          : 0;
 
                       return (
                         <div
                           key={person}
                         >
-                          <div className="mb-2 flex justify-between text-sm">
-                            <span>
+                          <div className="flex justify-between text-sm mb-2">
+                            <span className="text-slate-300">
                               {person}
                             </span>
 
@@ -1255,9 +2445,9 @@ export default function Home() {
                             </span>
                           </div>
 
-                          <div className="h-2 rounded-full bg-slate-800">
+                          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                             <div
-                              className="h-2 rounded-full bg-blue-500"
+                              className="h-full bg-blue-500 rounded-full transition-all"
                               style={{
                                 width: `${width}%`,
                               }}
@@ -1268,106 +2458,137 @@ export default function Home() {
                     }
                   )}
 
-                {(!analytics ||
-                  Object.keys(
+                  {Object.keys(
                     analytics.person_visit_counts
-                  ).length === 0) && (
-                  <p className="text-sm text-slate-500">
-                    No visitor activity yet.
-                  </p>
-                )}
-
-              </div>
-            </div>
-
-            {/* SECURITY */}
-
-            <div className="rounded-2xl bg-slate-900 p-6">
-
-              <div className="mb-5 flex items-center gap-2">
-                <ShieldCheck className="text-green-400" />
-
-                <h4 className="font-semibold">
-                  Security Monitoring
-                </h4>
+                  ).length === 0 && (
+                    <p className="text-sm text-slate-500">
+                      No visitor activity yet.
+                    </p>
+                  )}
+                </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="bg-slate-900 rounded-2xl p-6">
+                <div className="flex items-center gap-2 mb-5">
+                  <ShieldCheck
+                    size={20}
+                    className="text-green-400"
+                  />
 
-                <AlertBox
-                  title="High"
-                  value={
-                    analytics
-                      ?.alert_summary
-                      .high ?? 0
-                  }
-                  className="text-red-400"
-                />
+                  <h4 className="font-semibold">
+                    Security Monitoring
+                  </h4>
+                </div>
 
-                <AlertBox
-                  title="Medium"
-                  value={
-                    analytics
-                      ?.alert_summary
-                      .medium ?? 0
-                  }
-                  className="text-orange-400"
-                />
-
-                <AlertBox
-                  title="Low"
-                  value={
-                    analytics
-                      ?.alert_summary
-                      .low ?? 0
-                  }
-                  className="text-yellow-400"
-                />
-
-              </div>
-
-              <div className="mt-5 rounded-xl bg-green-500/10 p-4">
-
-                <div className="flex items-center gap-3">
-
-                  <CheckCircle2 className="text-green-400" />
-
-                  <div>
-                    <p className="font-semibold text-green-400">
-                      No Active Alerts
+                <div className="grid grid-cols-3 gap-3 mb-5">
+                  <div className="bg-slate-800 rounded-xl p-3 text-center">
+                    <p className="text-xs text-slate-400">
+                      High
                     </p>
 
-                    <p className="text-xs text-slate-400">
-                      Security monitoring is active.
+                    <p className="text-xl font-bold text-red-400">
+                      {
+                        analytics.alert_summary
+                          .high
+                      }
                     </p>
                   </div>
 
+                  <div className="bg-slate-800 rounded-xl p-3 text-center">
+                    <p className="text-xs text-slate-400">
+                      Medium
+                    </p>
+
+                    <p className="text-xl font-bold text-orange-400">
+                      {
+                        analytics.alert_summary
+                          .medium
+                      }
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-800 rounded-xl p-3 text-center">
+                    <p className="text-xs text-slate-400">
+                      Low
+                    </p>
+
+                    <p className="text-xl font-bold text-yellow-400">
+                      {
+                        analytics.alert_summary
+                          .low
+                      }
+                    </p>
+                  </div>
                 </div>
 
+                {analytics.security_alerts
+                  .length === 0 ? (
+                  <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4">
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="text-green-400" />
+
+                      <div>
+                        <p className="font-semibold text-green-400">
+                          No Active Alerts
+                        </p>
+
+                        <p className="text-xs text-slate-400 mt-1">
+                          No unusual activity
+                          detected.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {analytics.security_alerts
+                      .slice(0, 5)
+                      .map(
+                        (
+                          alert,
+                          index
+                        ) => (
+                          <div
+                            key={index}
+                            className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-3"
+                          >
+                            <p className="text-sm font-semibold text-orange-300">
+                              {alert.type}
+                            </p>
+
+                            <p className="text-xs text-slate-400 mt-1">
+                              {alert.visitor}
+                            </p>
+
+                            <p className="text-xs text-slate-500 mt-1">
+                              {alert.message}
+                            </p>
+                          </div>
+                        )
+                      )}
+                  </div>
+                )}
               </div>
             </div>
-          </div>
-
-          {/* REPEAT VISITORS */}
+          )}
 
           {analytics &&
             analytics.repeat_visitors
               .length > 0 && (
-              <div className="mt-6 rounded-2xl bg-slate-900 p-6">
-
-                <h4 className="mb-4 font-semibold">
+              <div className="mt-6 bg-slate-900 rounded-2xl p-6">
+                <h4 className="font-semibold mb-4">
                   Repeat Visitor Analysis
                 </h4>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {analytics.repeat_visitors.map(
-                    (visitor) => (
+                    (
+                      visitor,
+                      index
+                    ) => (
                       <div
-                        key={
-                          visitor.phone
-                        }
-                        className="rounded-xl bg-slate-800 p-4"
+                        key={`${visitor.phone}-${index}`}
+                        className="bg-slate-800 rounded-xl p-4"
                       >
                         <p className="font-semibold">
                           {visitor.name}
@@ -1377,7 +2598,7 @@ export default function Home() {
                           {visitor.phone}
                         </p>
 
-                        <p className="mt-2 text-sm text-blue-400">
+                        <p className="text-sm text-blue-400 mt-2">
                           {
                             visitor.visit_count
                           }{" "}
@@ -1386,27 +2607,23 @@ export default function Home() {
                       </div>
                     )
                   )}
-
                 </div>
               </div>
             )}
-
         </section>
 
         {/* REGISTER + SCANNER */}
 
-        <section
+        <div
           id="register"
-          className="mb-8 grid grid-cols-1 gap-6 xl:grid-cols-2"
+          className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8"
         >
 
           {/* REGISTER */}
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-6">
-
-            <div className="mb-6 flex items-center gap-3">
-
-              <div className="rounded-xl bg-blue-100 p-3 text-blue-600">
+          <section className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="bg-blue-100 text-blue-600 p-3 rounded-xl">
                 <UserPlus />
               </div>
 
@@ -1419,7 +2636,6 @@ export default function Home() {
                   Create a secure visitor identity
                 </p>
               </div>
-
             </div>
 
             <form
@@ -1428,7 +2644,6 @@ export default function Home() {
               }
               className="space-y-4"
             >
-
               <input
                 required
                 name="name"
@@ -1439,7 +2654,7 @@ export default function Home() {
                   handleChange
                 }
                 placeholder="Visitor Name"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
               />
 
               <input
@@ -1453,9 +2668,11 @@ export default function Home() {
                 onChange={
                   handleChange
                 }
+                pattern="[0-9]{10}"
                 maxLength={10}
+                title="Phone number must contain exactly 10 digits"
                 placeholder="Phone Number (10 digits)"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
               />
 
               <input
@@ -1468,8 +2685,10 @@ export default function Home() {
                 onChange={
                   handleChange
                 }
-                placeholder="Gmail (example@gmail.com)"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                pattern="[A-Za-z0-9._%+-]+@gmail\.com"
+                title="Please enter a valid Gmail address ending with @gmail.com"
+                placeholder="Email (example@gmail.com)"
+                className="w-full border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
               />
 
               <input
@@ -1482,7 +2701,7 @@ export default function Home() {
                   handleChange
                 }
                 placeholder="Person to Visit"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
               />
 
               <input
@@ -1495,95 +2714,86 @@ export default function Home() {
                   handleChange
                 }
                 placeholder="Purpose of Visit"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
               />
 
               <button
                 type="submit"
-                disabled={loading}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition"
               >
-                <QrCode size={19} />
-
-                {loading
-                  ? "Registering..."
-                  : "Register & Generate QR"}
+                <span className="flex items-center justify-center gap-2">
+                  <QrCode size={19} />
+                  Register & Generate QR
+                </span>
               </button>
-
             </form>
-
-            {/* WARNING */}
 
             {registerWarning && (
               <div
+                className="mt-4 rounded-xl border-2 border-amber-400 bg-amber-50 px-4 py-4 text-amber-900 shadow-sm"
                 role="alert"
-                className="mt-4 rounded-xl border-2 border-amber-400 bg-amber-50 px-4 py-4 text-amber-900"
               >
                 <div className="flex items-start gap-3">
-
                   <AlertTriangle
                     size={20}
                     className="mt-0.5 shrink-0 text-amber-600"
                   />
 
                   <div>
-
-                    <p className="font-bold">
+                    <p className="font-bold text-base">
                       Registration Warning
                     </p>
 
-                    <p className="mt-1 text-sm">
+                    <p className="text-sm mt-1">
                       {registerWarning.replace(
                         "⚠️ ",
                         ""
                       )}
                     </p>
-
                   </div>
                 </div>
               </div>
             )}
 
-            {/* QR RESULT */}
-
             {visitorId && (
-              <div className="mt-6 rounded-xl bg-slate-50 p-4">
-
+              <div className="mt-6 bg-slate-50 rounded-xl p-4">
                 {returningVisitor && (
-                  <div className="mb-4 rounded-xl bg-blue-50 p-4">
-
+                  <div className="mb-4 rounded-xl bg-blue-50 border border-blue-100 p-4">
                     <p className="font-bold text-blue-800">
                       Welcome back,{" "}
                       {
                         registeredVisitorName
-                      }!
-                    </p>
-
-                    <p className="mt-1 text-sm text-blue-700">
-                      Previous visits:{" "}
-                      {
-                        previousVisits
                       }
+                      !
                     </p>
 
+                    <p className="text-sm text-blue-700 mt-1">
+                      Previous visits:{" "}
+                      {previousVisits}
+                    </p>
+
+                    <p className="text-xs text-blue-600 mt-1">
+                      This registration has
+                      been created as a new
+                      visit with a new QR code.
+                    </p>
                   </div>
                 )}
 
                 <p className="text-xs text-slate-500">
-                  Visitor ID
+                  Generated Visitor ID
                 </p>
 
-                <p className="mt-1 break-all font-mono text-sm">
+                <p className="font-mono text-sm break-all mt-1">
                   {visitorId}
                 </p>
 
-                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-
+                <div className="flex flex-col sm:flex-row gap-3 mt-4">
                   <a
                     href={`${API_BASE_URL}/qr/${visitorId}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700"
+                    className="flex-1 inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-xl font-semibold hover:bg-blue-700 transition"
                   >
                     <QrCode size={17} />
                     View QR
@@ -1591,25 +2801,21 @@ export default function Home() {
 
                   <a
                     href={`${API_BASE_URL}/qr/${visitorId}/download`}
-                    className="flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 font-semibold text-white hover:bg-slate-800"
+                    className="flex-1 inline-flex items-center justify-center gap-2 bg-slate-950 text-white px-4 py-3 rounded-xl font-semibold hover:bg-slate-800 transition"
                   >
                     <QrCode size={17} />
                     Download QR
                   </a>
-
                 </div>
               </div>
             )}
+          </section>
 
-          </div>
+          {/* SECURITY SCANNER */}
 
-          {/* SCANNER */}
-
-          <div className="rounded-3xl bg-slate-950 p-6 text-white">
-
-            <div className="mb-6 flex items-center gap-3">
-
-              <div className="rounded-xl bg-blue-600 p-3">
+          <section className="bg-slate-950 text-white rounded-3xl shadow-sm p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="bg-blue-600 p-3 rounded-xl">
                 <ScanLine />
               </div>
 
@@ -1622,69 +2828,83 @@ export default function Home() {
                   Scan visitor identity
                 </p>
               </div>
-
             </div>
 
-            {selectedVisitor ? (
-              <div className="rounded-2xl bg-white p-5 text-slate-900">
+            {!selectedVisitor ? (
+              <div className="border border-dashed border-slate-700 rounded-2xl min-h-[310px] flex flex-col items-center justify-center text-center">
+                <QrCode
+                  size={70}
+                  className="text-slate-600 mb-5"
+                />
 
-                <div className="flex items-start justify-between">
+                <p className="text-slate-400 mb-5">
+                  Scan a visitor QR code
+                </p>
 
+                <button
+                  onClick={
+                    startScanner
+                  }
+                  className="bg-blue-600 px-6 py-3 rounded-xl font-semibold hover:bg-blue-700"
+                >
+                  Start Camera Scanner
+                </button>
+              </div>
+            ) : (
+              <div className="bg-white text-slate-900 rounded-2xl p-5">
+                <div className="flex justify-between items-start">
                   <div>
                     <p className="text-sm text-slate-500">
-                      Visitor
+                      Verified Visitor
                     </p>
 
-                    <h4 className="mt-1 text-2xl font-bold">
+                    <h4 className="text-2xl font-bold mt-1">
                       {
                         selectedVisitor.name
                       }
                     </h4>
                   </div>
 
-                  <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
+                  <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">
                     VERIFIED
                   </span>
-
                 </div>
 
-                <div className="mt-5 space-y-3">
-
-                  <p className="flex items-center gap-3 text-sm">
+                <div className="space-y-3 mt-5">
+                  <div className="flex items-center gap-3 text-sm">
                     <Phone size={17} />
                     {
                       selectedVisitor.phone
                     }
-                  </p>
+                  </div>
 
-                  <p className="flex items-center gap-3 text-sm">
+                  <div className="flex items-center gap-3 text-sm">
                     <Mail size={17} />
                     {
                       selectedVisitor.email
                     }
-                  </p>
+                  </div>
 
-                  <p className="flex items-center gap-3 text-sm">
-                    <CalendarDays size={17} />
+                  <div className="flex items-center gap-3 text-sm">
+                    <CalendarDays
+                      size={17}
+                    />
                     {
                       selectedVisitor.purpose
                     }
-                  </p>
-
+                  </div>
                 </div>
 
-                <div className="mt-6">
-
+                <div className="flex gap-3 mt-6">
                   {selectedVisitor.status ===
                     "Not Checked In" && (
                     <button
-                      type="button"
                       onClick={() =>
                         checkIn(
                           selectedVisitor.visitor_id
                         )
                       }
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 py-3 font-semibold text-white hover:bg-green-700"
+                      className="flex-1 bg-green-600 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2"
                     >
                       <LogIn size={18} />
                       Check In
@@ -1694,13 +2914,12 @@ export default function Home() {
                   {selectedVisitor.status ===
                     "Checked In" && (
                     <button
-                      type="button"
                       onClick={() =>
                         checkOut(
                           selectedVisitor.visitor_id
                         )
                       }
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 py-3 font-semibold text-white hover:bg-orange-700"
+                      className="flex-1 bg-orange-600 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2"
                     >
                       <LogOut size={18} />
                       Check Out
@@ -1709,67 +2928,36 @@ export default function Home() {
 
                   {selectedVisitor.status ===
                     "Checked Out" && (
-                    <div className="rounded-xl bg-slate-100 py-3 text-center font-semibold text-slate-600">
+                    <div className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl text-center font-semibold">
                       Visit Completed
                     </div>
                   )}
-
                 </div>
               </div>
-            ) : (
-              <div className="flex min-h-[310px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-700 text-center">
-
-                <QrCode
-                  size={70}
-                  className="mb-5 text-slate-600"
-                />
-
-                <p className="mb-5 text-slate-400">
-                  Scan a visitor QR code
-                </p>
-
-                <button
-                  type="button"
-                  onClick={
-                    startScanner
-                  }
-                  className="rounded-xl bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-700"
-                >
-                  Start Camera Scanner
-                </button>
-
-              </div>
             )}
-
-          </div>
-
-        </section>
+          </section>
+        </div>
 
         {/* VISITOR RECORDS */}
 
         <section
           id="records"
-          className="rounded-3xl border border-slate-200 bg-white"
+          className="bg-white rounded-3xl border border-slate-200 shadow-sm"
         >
-
-          <div className="border-b border-slate-200 p-6">
-
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-
+          <div className="p-6 border-b border-slate-200">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <h3 className="text-xl font-bold">
                   Visitor Records
                 </h3>
 
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="text-sm text-slate-500 mt-1">
                   Registered visitor activity
                 </p>
               </div>
 
               <div className="flex gap-3">
-
                 <div className="relative">
-
                   <Search
                     size={18}
                     className="absolute left-3 top-3 text-slate-400"
@@ -1783,17 +2971,16 @@ export default function Home() {
                       )
                     }
                     placeholder="Search visitors..."
-                    className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-4 outline-none focus:ring-2 focus:ring-blue-500 sm:w-64"
+                    className="border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
                   />
-
                 </div>
 
                 <button
-                  type="button"
                   onClick={
                     refreshDashboard
                   }
-                  className="rounded-xl border border-slate-200 px-4 hover:bg-slate-50"
+                  className="border border-slate-200 rounded-xl px-4 hover:bg-slate-50"
+                  title="Refresh"
                 >
                   <RefreshCw
                     size={18}
@@ -1805,141 +2992,116 @@ export default function Home() {
                     }
                   />
                 </button>
-
               </div>
-
             </div>
 
-            {/* FILTER BUTTONS */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6">
+              {filterButtons.map(
+                (filter) => {
+                  const isActive =
+                    activeFilter ===
+                    filter.label;
 
-            <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  return (
+                    <button
+                      key={
+                        filter.label
+                      }
+                      onClick={() =>
+                        setActiveFilter(
+                          filter.label
+                        )
+                      }
+                      className={`flex items-center justify-between gap-2 px-4 py-3 rounded-xl border transition ${
+                        isActive
+                          ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 text-sm font-semibold">
+                        {filter.icon}
 
-              <FilterButton
-                label="All Visitors"
-                count={
-                  totalVisitors
-                }
-                active={
-                  activeFilter ===
-                  "All Visitors"
-                }
-                onClick={() =>
-                  setActiveFilter(
-                    "All Visitors"
-                  )
-                }
-                icon={
-                  <Users size={17} />
-                }
-              />
+                        {
+                          filter.label
+                        }
+                      </span>
 
-              <FilterButton
-                label="Checked In"
-                count={
-                  currentlyInside
+                      <span
+                        className={`min-w-7 h-7 px-2 rounded-full flex items-center justify-center text-xs font-bold ${
+                          isActive
+                            ? "bg-white text-blue-600"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {
+                          filter.count
+                        }
+                      </span>
+                    </button>
+                  );
                 }
-                active={
-                  activeFilter ===
-                  "Checked In"
-                }
-                onClick={() =>
-                  setActiveFilter(
-                    "Checked In"
-                  )
-                }
-                icon={
-                  <UserCheck
-                    size={17}
-                  />
-                }
-              />
-
-              <FilterButton
-                label="Checked Out"
-                count={
-                  checkedOut
-                }
-                active={
-                  activeFilter ===
-                  "Checked Out"
-                }
-                onClick={() =>
-                  setActiveFilter(
-                    "Checked Out"
-                  )
-                }
-                icon={
-                  <LogOut size={17} />
-                }
-              />
-
-              <FilterButton
-                label="Not Checked In"
-                count={
-                  notCheckedIn
-                }
-                active={
-                  activeFilter ===
-                  "Not Checked In"
-                }
-                onClick={() =>
-                  setActiveFilter(
-                    "Not Checked In"
-                  )
-                }
-                icon={
-                  <UserX size={17} />
-                }
-              />
-
+              )}
             </div>
 
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-4">
+              <p className="text-sm text-slate-500">
+                Showing:{" "}
+                <span className="font-semibold text-slate-800">
+                  {activeFilter}
+                </span>
+              </p>
+
+              <p className="text-sm text-slate-500">
+                {
+                  filteredVisitors.length
+                }{" "}
+                {filteredVisitors.length ===
+                1
+                  ? "visitor"
+                  : "visitors"}
+              </p>
+            </div>
           </div>
 
-          {/* TABLE */}
-
           <div className="overflow-x-auto">
-
-            <table className="w-full min-w-[950px]">
-
+            <table className="w-full">
               <thead className="bg-slate-50">
-
                 <tr>
-
-                  <th className="p-4 text-left text-xs uppercase text-slate-500">
+                  <th className="text-left p-4 text-xs uppercase text-slate-500">
                     Visitor
                   </th>
 
-                  <th className="p-4 text-left text-xs uppercase text-slate-500">
+                  <th className="text-left p-4 text-xs uppercase text-slate-500">
                     Contact
                   </th>
 
-                  <th className="p-4 text-left text-xs uppercase text-slate-500">
+                  <th className="text-left p-4 text-xs uppercase text-slate-500">
                     Purpose
                   </th>
 
-                  <th className="p-4 text-left text-xs uppercase text-slate-500">
+                  <th className="text-left p-4 text-xs uppercase text-slate-500">
                     Status
                   </th>
 
-                  <th className="p-4 text-left text-xs uppercase text-slate-500">
+                  <th className="text-left p-4 text-xs uppercase text-slate-500">
+                    Approval
+                  </th>
+
+                  <th className="text-left p-4 text-xs uppercase text-slate-500">
                     Entry
                   </th>
 
-                  <th className="p-4 text-left text-xs uppercase text-slate-500">
+                  <th className="text-left p-4 text-xs uppercase text-slate-500">
                     Exit
                   </th>
 
-                  <th className="p-4 text-left text-xs uppercase text-slate-500">
+                  <th className="text-left p-4 text-xs uppercase text-slate-500">
                     Actions
                   </th>
-
                 </tr>
-
               </thead>
 
               <tbody>
-
                 {filteredVisitors.map(
                   (visitor) => (
                     <tr
@@ -1948,60 +3110,44 @@ export default function Home() {
                       }
                       className="border-t border-slate-100 hover:bg-slate-50"
                     >
-
                       <td className="p-4">
+                        <div className="font-semibold">
+                          {visitor.name}
+                        </div>
 
-                        <p className="font-semibold">
-                          {
-                            visitor.name
-                          }
-                        </p>
-
-                        <p className="mt-1 max-w-[180px] truncate font-mono text-xs text-slate-400">
+                        <div className="text-xs text-slate-400 font-mono mt-1 max-w-[180px] truncate">
                           {
                             visitor.visitor_id
                           }
-                        </p>
-
+                        </div>
                       </td>
 
                       <td className="p-4">
+                        <div className="text-sm">
+                          {visitor.phone}
+                        </div>
 
-                        <p className="text-sm">
-                          {
-                            visitor.phone
-                          }
-                        </p>
-
-                        <p className="text-xs text-slate-400">
-                          {
-                            visitor.email
-                          }
-                        </p>
-
+                        <div className="text-xs text-slate-400">
+                          {visitor.email}
+                        </div>
                       </td>
 
                       <td className="p-4">
+                        <div className="text-sm font-medium">
+                          {visitor.purpose}
+                        </div>
 
-                        <p className="text-sm font-medium">
-                          {
-                            visitor.purpose
-                          }
-                        </p>
-
-                        <p className="text-xs text-slate-400">
+                        <div className="text-xs text-slate-400">
                           To:{" "}
                           {
                             visitor.person_to_visit
                           }
-                        </p>
-
+                        </div>
                       </td>
 
                       <td className="p-4">
-
                         <span
-                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          className={`px-3 py-1 rounded-full text-xs font-bold ${
                             visitor.status ===
                             "Checked In"
                               ? "bg-green-100 text-green-700"
@@ -2011,78 +3157,116 @@ export default function Home() {
                               : "bg-orange-100 text-orange-700"
                           }`}
                         >
-                          {
-                            visitor.status
-                          }
+                          {visitor.status}
                         </span>
-
-                      </td>
-
-                      <td className="p-4 text-sm text-slate-600">
-                        {
-                          formatDate(
-                            visitor.entry_time
-                          )
-                        }
-                      </td>
-
-                      <td className="p-4 text-sm text-slate-600">
-                        {
-                          formatDate(
-                            visitor.exit_time
-                          )
-                        }
                       </td>
 
                       <td className="p-4">
-
-                        <div className="flex gap-2">
-
-                          <a
-                            href={`${API_BASE_URL}/qr/${visitor.visitor_id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded-lg bg-slate-100 p-2 hover:bg-slate-200"
-                          >
-                            <QrCode
-                              size={17}
-                            />
-                          </a>
-
-                          {visitor.status ===
-                            "Not Checked In" && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                checkIn(
-                                  visitor.visitor_id
-                                )
-                              }
-                              className="rounded-lg bg-green-100 px-3 py-2 text-xs font-bold text-green-700"
-                            >
-                              Check In
-                            </button>
-                          )}
-
-                          {visitor.status ===
-                            "Checked In" && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                checkOut(
-                                  visitor.visitor_id
-                                )
-                              }
-                              className="rounded-lg bg-orange-100 px-3 py-2 text-xs font-bold text-orange-700"
-                            >
-                              Check Out
-                            </button>
-                          )}
-
-                        </div>
-
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-bold ${
+                            visitor.approval_status ===
+                            "Approved"
+                              ? "bg-green-100 text-green-700"
+                              : visitor.approval_status ===
+                                "Rejected"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
+                          {visitor.approval_status ||
+                            "Pending Approval"}
+                        </span>
                       </td>
 
+                      <td className="p-4 text-sm text-slate-600">
+                        {formatDate(
+                          visitor.entry_time
+                        )}
+                      </td>
+
+                      <td className="p-4 text-sm text-slate-600">
+                        {formatDate(
+                          visitor.exit_time
+                        )}
+                      </td>
+
+                      <td className="p-4">
+                        <div className="flex gap-2 flex-wrap">
+                          {visitor.approval_status ===
+                            "Approved" && (
+                            <a
+                              href={`${API_BASE_URL}/qr/${visitor.visitor_id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="bg-slate-100 hover:bg-slate-200 p-2 rounded-lg"
+                              title="View QR"
+                            >
+                              <QrCode
+                                size={17}
+                              />
+                            </a>
+                          )}
+
+                          {visitor.approval_status ===
+                            "Pending Approval" && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  approveVisitor(
+                                    visitor.visitor_id
+                                  )
+                                }
+                                className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-xs font-bold"
+                              >
+                                Approve
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  rejectVisitor(
+                                    visitor.visitor_id
+                                  )
+                                }
+                                className="bg-red-100 text-red-700 px-3 py-2 rounded-lg text-xs font-bold"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
+
+                          {visitor.approval_status ===
+                            "Approved" &&
+                            visitor.status ===
+                              "Not Checked In" && (
+                              <button
+                                onClick={() =>
+                                  checkIn(
+                                    visitor.visitor_id
+                                  )
+                                }
+                                className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-xs font-bold"
+                              >
+                                Check In
+                              </button>
+                            )}
+
+                          {visitor.approval_status ===
+                            "Approved" &&
+                            visitor.status ===
+                              "Checked In" && (
+                              <button
+                                onClick={() =>
+                                  checkOut(
+                                    visitor.visitor_id
+                                  )
+                                }
+                                className="bg-orange-100 text-orange-700 px-3 py-2 rounded-lg text-xs font-bold"
+                              >
+                                Check Out
+                              </button>
+                            )}
+                        </div>
+                      </td>
                     </tr>
                   )
                 )}
@@ -2091,198 +3275,63 @@ export default function Home() {
                   0 && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="p-10 text-center text-slate-500"
                     >
                       No visitors found.
                     </td>
                   </tr>
                 )}
-
               </tbody>
-
             </table>
-
           </div>
-
         </section>
 
-        <footer className="py-8 text-center text-sm text-slate-400">
-          AI Smart Visitor Management System • Secure QR-Based Visitor Tracking
-        </footer>
+        {/* FOOTER */}
 
+        <div className="text-center text-sm text-slate-400 mt-8 pb-5">
+          AI Smart Visitor Management System •
+          Secure QR-Based Visitor Tracking
+        </div>
       </main>
 
       {/* QR SCANNER MODAL */}
 
       {scannerOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-5">
-
-          <div className="w-full max-w-lg rounded-3xl bg-white p-6">
-
-            <div className="mb-5 flex items-center justify-between">
-
+        <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-5">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-lg shadow-2xl">
+            <div className="flex justify-between items-center mb-5">
               <div>
                 <h3 className="text-xl font-bold">
                   Scan Visitor QR
                 </h3>
 
                 <p className="text-sm text-slate-500">
-                  Point the camera at the QR code
+                  Point the camera at the QR
+                  code
                 </p>
               </div>
 
               <button
-                type="button"
                 onClick={() =>
                   setScannerOpen(
                     false
                   )
                 }
-                className="rounded-lg p-2 hover:bg-slate-100"
+                className="p-2 hover:bg-slate-100 rounded-lg"
+                title="Close scanner"
               >
                 <X />
               </button>
-
             </div>
 
             <div
               id="qr-reader"
               className="overflow-hidden rounded-xl"
             />
-
           </div>
-
         </div>
       )}
-
     </div>
-  );
-}
-
-/*
-=====================================================
-STAT CARD
-=====================================================
-*/
-
-function StatCard({
-  title,
-  value,
-  icon,
-  iconClass,
-}: {
-  title: string;
-  value: number;
-  icon: React.ReactNode;
-  iconClass: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6">
-
-      <div className="flex items-center justify-between">
-
-        <div>
-
-          <p className="text-sm text-slate-500">
-            {title}
-          </p>
-
-          <p className="mt-2 text-3xl font-bold">
-            {value}
-          </p>
-
-        </div>
-
-        <div
-          className={`rounded-xl p-3 ${iconClass}`}
-        >
-          {icon}
-        </div>
-
-      </div>
-
-    </div>
-  );
-}
-
-/*
-=====================================================
-ALERT BOX
-=====================================================
-*/
-
-function AlertBox({
-  title,
-  value,
-  className,
-}: {
-  title: string;
-  value: number;
-  className: string;
-}) {
-  return (
-    <div className="rounded-xl bg-slate-800 p-3 text-center">
-
-      <p className="text-xs text-slate-400">
-        {title}
-      </p>
-
-      <p
-        className={`text-xl font-bold ${className}`}
-      >
-        {value}
-      </p>
-
-    </div>
-  );
-}
-
-/*
-=====================================================
-FILTER BUTTON
-=====================================================
-*/
-
-function FilterButton({
-  label,
-  count,
-  active,
-  onClick,
-  icon,
-}: {
-  label: FilterType;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex items-center justify-between rounded-xl border px-4 py-3 transition ${
-        active
-          ? "border-blue-600 bg-blue-600 text-white"
-          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-      }`}
-    >
-
-      <span className="flex items-center gap-2 text-sm font-semibold">
-        {icon}
-        {label}
-      </span>
-
-      <span
-        className={`flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-xs font-bold ${
-          active
-            ? "bg-white text-blue-600"
-            : "bg-slate-100 text-slate-600"
-        }`}
-      >
-        {count}
-      </span>
-
-    </button>
   );
 }
